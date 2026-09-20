@@ -47,7 +47,7 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [x] **Erster kompletter Testkauf erfolgreich**: Anmeldung per E-Mail-Link →
       PayPal-Abo abgeschlossen → Webhook kam an → Status automatisch auf
       "aktiv" gesetzt — Kernfunktion des ganzen Systems bestätigt
-- [ ] Eigene Domain (`test.roewise.com`) statt `pages.dev`/`workers.dev`
+- [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
 - [ ] Kundenbereich (Abo-Status ansehen, Geräte verwalten, kündigen)
 - [ ] Admin-Bereich
 - [ ] E-Mail-Versand (Bestätigungen, Kündigung, Sperrung, ...)
