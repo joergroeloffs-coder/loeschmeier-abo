@@ -50,8 +50,9 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
 - [x] Kundenbereich (`app/kundenbereich.html`): Abo-Status, Geräte, Kündigung
 - [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — getestet, funktioniert
-- [ ] E-Mail-Versand (Bestätigungen, Kündigung, Sperrung, ...)
-- [ ] Rechtliche Seiten (Impressum/Datenschutz/AGB/Widerruf) für dieses Produkt
+- [ ] E-Mail-Versand (Resend, Domain-Verifizierung läuft gerade)
+- [x] Rechtliche Seiten (Impressum, Datenschutz, AGB, Widerruf) — **Hinweis: vor echtem
+      Verkaufsstart von Rechtsberatung prüfen lassen**, siehe `app/agb.html`
 - [ ] Rechnungsstellung
 - [ ] Weitere Testfälle (Kündigung, Zahlungsausfall, Rückerstattung, Gerätelimit, ...)
 - [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
