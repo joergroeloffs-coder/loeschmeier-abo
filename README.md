@@ -53,9 +53,23 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [ ] E-Mail-Versand (Resend, Domain-Verifizierung läuft gerade)
 - [x] Rechtliche Seiten (Impressum, Datenschutz, AGB, Widerruf) — **Hinweis: vor echtem
       Verkaufsstart von Rechtsberatung prüfen lassen**, siehe `app/agb.html`
+- [x] **Sicherheitsfix**: App (`nutzer/`, `nutzer-admin/`) war bisher ohne jede
+      Abo-Prüfung nutzbar — jetzt an `/api/zugriff` gekoppelt (`app/zugriffspruefung.js`),
+      inkl. 24h-Offline-Gnadenfrist für Einsatzsituationen
+- [x] XSS-Härtung im Admin-Bereich (E-Mail/Notiz-Felder werden jetzt escaped)
+- [ ] **Offen: Admin-Login ohne Rate Limiting** (Passwort theoretisch erratbar) —
+      Cloudflare-Dashboard-Regel empfohlen, siehe unten
 - [ ] Rechnungsstellung
 - [ ] Weitere Testfälle (Kündigung, Zahlungsausfall, Rückerstattung, Gerätelimit, ...)
 - [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
+
+## Bekannte offene Sicherheitslücke: Admin-Login
+
+`admin.html` schützt nur per Passwortvergleich, ohne Begrenzung der Versuche.
+Empfehlung: im Cloudflare-Dashboard unter "Security" → "WAF" → "Rate limiting
+rules" eine Regel für `/api/admin/*` anlegen (z.B. max. 5 Anfragen/Minute pro
+IP). Das ist ein Klick-Vorgang im Dashboard, kein Code nötig — sag Bescheid,
+wenn du so weit bist, dann führe ich dich durch.
 
 ## Worker-Code
 
