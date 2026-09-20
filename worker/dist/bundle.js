@@ -150,7 +150,7 @@ async function kuendigeAbo(env, paypalSubscriptionId, grund) {
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Passwort",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
