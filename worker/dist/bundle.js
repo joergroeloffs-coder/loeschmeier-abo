@@ -270,15 +270,18 @@ async function verarbeiteEreignis(db, env, ereignis) {
       if (abos.length === 0) break;
       const abo = abos[0];
 
-      await db.insert("payments", [
+      const betragCent = Math.round(parseFloat(resource.amount?.total || "0") * 100);
+      const neueZahlung = await db.insert("payments", [
         {
           subscription_id: abo.id,
           paypal_capture_id: resource.id,
-          betrag_cent: Math.round(parseFloat(resource.amount?.total || "0") * 100),
+          betrag_cent: betragCent,
           waehrung: resource.amount?.currency || "EUR",
           status: "erfolgreich",
         },
       ]);
+
+      await erstelleRechnung(db, abo.id, neueZahlung[0].id, betragCent);
 
       // Aktiviert das Abo (falls es aus Kulanzzeit/ueberfaellig kam) und
       // aktualisiert den bezahlten Zeitraum anhand der aktuellen PayPal-Daten.
@@ -548,6 +551,34 @@ async function kundeEntferntGeraet(request, env) {
 
   await db.delete("devices", `id=eq.${body.device_id}`);
   return json({ status: "entfernt" });
+}
+
+// ---------- Rechnungsstellung ----------
+// Automatisch bei jeder erfolgreichen Zahlung. Fortlaufende Nummer pro Jahr
+// im Format JAHR-NNNN (z.B. 2026-0001), wie mit dem Betreiber festgelegt.
+
+async function erstelleRechnung(db, subscriptionId, paymentId, betragCent) {
+  const jahr = new Date().getFullYear();
+  const bestehende = await db.select(
+    "invoices",
+    `rechnungsnummer=like.${jahr}-*&select=rechnungsnummer&order=rechnungsnummer.desc&limit=1`
+  );
+
+  let naechsteLaufnummer = 1;
+  if (bestehende.length > 0) {
+    const teile = bestehende[0].rechnungsnummer.split("-");
+    naechsteLaufnummer = parseInt(teile[1], 10) + 1;
+  }
+  const rechnungsnummer = `${jahr}-${String(naechsteLaufnummer).padStart(4, "0")}`;
+
+  await db.insert("invoices", [
+    {
+      subscription_id: subscriptionId,
+      payment_id: paymentId,
+      rechnungsnummer,
+      betrag_cent: betragCent,
+    },
+  ]);
 }
 
 // ---------- Taeglicher Abgleich (faengt ausgefallene Webhooks ab) ----------

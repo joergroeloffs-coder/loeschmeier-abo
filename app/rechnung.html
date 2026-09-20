@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rechnung – Löschmeier Test</title>
+<style>
+  :root{--bg:#0d1116;--text:#e6edf3;--muted:#93a3b3;--signal:#2fa4ff;--border:#2a313c}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    max-width:640px;margin:0 auto;padding:40px 20px;line-height:1.6;
+  }
+  .werkzeuge{display:flex;justify-content:space-between;margin-bottom:24px}
+  .werkzeuge a{color:var(--signal);text-decoration:none;font-size:14px}
+  button.drucken{background:var(--signal);color:#0d1116;border:0;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer}
+
+  .rechnung{background:#fff;color:#111;border-radius:8px;padding:36px}
+  .kopf{display:flex;justify-content:space-between;margin-bottom:32px}
+  .kopf h1{font-size:22px;margin:0}
+  .absender{font-size:13px;color:#555}
+  .zeile{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:14px}
+  .zeile.summe{font-weight:700;font-size:16px;border-bottom:none;border-top:2px solid #111;margin-top:6px;padding-top:10px}
+  .hinweis{font-size:12px;color:#777;margin-top:24px}
+  #status{font-size:14px;color:var(--muted)}
+
+  @media print{
+    .werkzeuge{display:none}
+    body{max-width:none;padding:0;background:#fff}
+    .rechnung{border-radius:0;padding:0}
+  }
+</style>
+</head>
+<body>
+
+<div class="werkzeuge">
+  <a href="/kundenbereich.html">← Zurück zum Kundenbereich</a>
+  <button class="drucken" onclick="window.print()">Als PDF speichern / drucken</button>
+</div>
+
+<p id="status">Lade Rechnung …</p>
+<div class="rechnung" id="rechnung" style="display:none">
+  <div class="kopf">
+    <div>
+      <h1>Rechnung</h1>
+      <p class="absender">
+        Jörg Roeloffs<br>
+        Scholkwai 86<br>
+        25938 Süderende<br>
+        wasserentnahme-foehr@web.de
+      </p>
+    </div>
+    <div style="text-align:right;font-size:13px">
+      <div><b>Rechnungsnummer:</b> <span id="r-nummer"></span></div>
+      <div><b>Datum:</b> <span id="r-datum"></span></div>
+      <div><b>Steuernummer:</b> [wird nachgetragen]</div>
+    </div>
+  </div>
+
+  <p style="font-size:13px;color:#555">Rechnungsempfänger: <span id="r-email"></span></p>
+
+  <div class="zeile"><span>Position</span><span>Betrag</span></div>
+  <div class="zeile"><span id="r-tarif">Löschmeier – Abo</span><span id="r-betrag"></span></div>
+  <div class="zeile summe"><span>Gesamt</span><span id="r-gesamt"></span></div>
+
+  <p class="hinweis" id="r-ust-hinweis">
+    Kleinunternehmer-Status noch nicht final geklärt — Angaben zur Umsatzsteuer
+    werden nachgetragen, sobald das Gewerbe angemeldet ist.
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function formatDatum(iso){
+    return new Date(iso).toLocaleDateString("de-DE");
+  }
+  function formatBetrag(cent){
+    return (cent / 100).toFixed(2).replace(".", ",") + " €";
+  }
+
+  async function laden(){
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    if(!id){ document.getElementById("status").textContent = "Keine Rechnung angegeben."; return; }
+
+    const { data: { session } } = await sb.auth.getSession();
+    if(!session){ document.getElementById("status").textContent = "Bitte zuerst anmelden."; return; }
+
+    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + session.access_token };
+
+    // RLS beschraenkt das Ergebnis automatisch auf eigene Rechnungen.
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/invoices?id=eq.${id}&select=*,subscriptions(tariffs(bezeichnung),customer_profiles(email))`,
+      { headers }
+    );
+    const rechnungen = await res.json();
+    if(!rechnungen.length){
+      document.getElementById("status").textContent = "Rechnung nicht gefunden oder kein Zugriff.";
+      return;
+    }
+    const r = rechnungen[0];
+
+    document.getElementById("r-nummer").textContent = r.rechnungsnummer;
+    document.getElementById("r-datum").textContent = formatDatum(r.ausgestellt_am);
+    document.getElementById("r-email").textContent = r.subscriptions?.customer_profiles?.email || "";
+    document.getElementById("r-tarif").textContent = r.subscriptions?.tariffs?.bezeichnung || "Löschmeier – Abo";
+    document.getElementById("r-betrag").textContent = formatBetrag(r.betrag_cent);
+    document.getElementById("r-gesamt").textContent = formatBetrag(r.betrag_cent);
+
+    document.getElementById("status").style.display = "none";
+    document.getElementById("rechnung").style.display = "block";
+  }
+
+  laden();
+</script>
+
+</body>
+</html>

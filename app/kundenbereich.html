@@ -81,6 +81,11 @@
   <div id="geraete-liste"></div>
 </div>
 
+<div class="karte" id="rechnungen-karte" style="display:none">
+  <h2>Rechnungen</h2>
+  <div id="rechnungen-liste"></div>
+</div>
+
 <div class="karte" id="kein-abo-karte" style="display:none">
   <p class="sub">Noch kein Abo vorhanden.</p>
   <a class="btn" href="/registrieren.html" style="text-decoration:none; display:block; text-align:center">Jetzt abonnieren</a>
@@ -194,6 +199,28 @@
       `).join("");
     }
     document.getElementById("geraete-karte").style.display = "block";
+
+    // Rechnungen laden (RLS beschraenkt automatisch auf eigene Rechnungen)
+    const rechnungenRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/invoices?select=id,rechnungsnummer,betrag_cent,ausgestellt_am,subscriptions!inner(customer_id)&subscriptions.customer_id=eq.${profile[0].id}&order=ausgestellt_am.desc`,
+      { headers }
+    );
+    const rechnungen = await rechnungenRes.json();
+    const rListe = document.getElementById("rechnungen-liste");
+    if(!Array.isArray(rechnungen) || rechnungen.length === 0){
+      rListe.innerHTML = '<p class="sub" style="margin:0">Noch keine Rechnung vorhanden.</p>';
+    } else {
+      rListe.innerHTML = rechnungen.map(r => `
+        <div class="geraet">
+          <span>
+            <span style="display:block">${r.rechnungsnummer}</span>
+            <span class="sub">${formatDatum(r.ausgestellt_am)} · ${(r.betrag_cent / 100).toFixed(2).replace(".", ",")} €</span>
+          </span>
+          <a class="btn" style="width:auto;margin:0;padding:8px 12px;font-size:12px;text-decoration:none" href="/rechnung.html?id=${r.id}">Ansehen</a>
+        </div>
+      `).join("");
+    }
+    document.getElementById("rechnungen-karte").style.display = "block";
   }
 
   async function geraetEntfernen(deviceId){
