@@ -60,7 +60,11 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
       inkl. 24h-Offline-Gnadenfrist für Einsatzsituationen
 - [x] XSS-Härtung im Admin-Bereich (E-Mail/Notiz-Felder werden jetzt escaped)
 - [x] Admin-Login gegen Rate Limiting abgesichert (KV-basiert, max. 30 Anfragen/Minute/IP)
-- [ ] Rechnungsstellung
+- [x] Rechnungsstellung: automatische fortlaufende Nummer (`JAHR-NNNN`) bei
+      jeder Zahlung, druckbare Rechnung (`app/rechnung.html`), Liste im
+      Kundenbereich — **Steuernummer noch Platzhalter** (Gewerbe noch nicht
+      angemeldet), **Kleinunternehmer-Status noch offen**, beides in
+      `app/rechnung.html` nachtragen, sobald bekannt
 - [x] Testfall: Kündigung im Kundenbereich — bestätigt (PayPal storniert, Zugang bis Vertragsende)
 - [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
 - [ ] Weitere Testfälle (Zahlungsausfall, Rückerstattung)
