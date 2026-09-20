@@ -66,6 +66,10 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
 - [ ] Weitere Testfälle (Zahlungsausfall, Rückerstattung)
 - [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
+- [ ] Anleitung (`app/anleitung/index.html`) um browserabhängige Installations-
+      Hinweise ergänzen: Chrome/Edge = echte Vollbild-App-Installation,
+      Firefox Desktop = nur Verknüpfung im Browser-Fenster (kein Vollbild),
+      iOS/Safari = eigener Ablauf über "Teilen" → "Zum Home-Bildschirm"
 - [x] Kunde kann eigene Geräte selbst entfernen (`app/kundenbereich.html`)
 - [x] **Fix**: `test.roewise.com` (Wurzel-Adresse) zeigte bisher direkt die
       interne Hauptversion (Datenpflege-Tool) statt einer Registrierungsseite —
