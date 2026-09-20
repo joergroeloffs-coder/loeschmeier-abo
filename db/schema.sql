@@ -65,7 +65,7 @@ create index on payments (subscription_id);
 -- ---------- Rechnungen ----------
 create table invoices (
   id uuid primary key default uuid_generate_v4(),
-  subscription_id uuid not null references subscriptions(id),
+  subscription_id uuid not null references subscriptions(id) on delete cascade,
   payment_id uuid references payments(id),
   rechnungsnummer text unique not null,
   betrag_cent integer not null,
@@ -110,7 +110,7 @@ create table webhook_events (
 -- ---------- Benachrichtigungen (Protokoll, nicht der Versand selbst) ----------
 create table notifications (
   id uuid primary key default uuid_generate_v4(),
-  customer_id uuid references customer_profiles(id),
+  customer_id uuid references customer_profiles(id) on delete set null,
   typ text not null,
   gesendet_am timestamptz not null default now(),
   erfolgreich boolean not null default true
@@ -121,8 +121,8 @@ create table admin_actions (
   id uuid primary key default uuid_generate_v4(),
   admin_name text not null,
   aktion text not null,
-  subscription_id uuid references subscriptions(id),
-  customer_id uuid references customer_profiles(id),
+  subscription_id uuid references subscriptions(id) on delete set null,
+  customer_id uuid references customer_profiles(id) on delete set null,
   zeitpunkt timestamptz not null default now(),
   details text
 );
@@ -130,7 +130,7 @@ create table admin_actions (
 -- ---------- Sicherheitsereignisse ----------
 create table security_events (
   id uuid primary key default uuid_generate_v4(),
-  customer_id uuid references customer_profiles(id),
+  customer_id uuid references customer_profiles(id) on delete set null,
   typ text not null,                            -- z.B. 'zu_viele_geraete', 'login_fehlgeschlagen'
   zeitpunkt timestamptz not null default now(),
   details text
@@ -139,7 +139,7 @@ create table security_events (
 -- ---------- Kündigungen ----------
 create table cancellations (
   id uuid primary key default uuid_generate_v4(),
-  subscription_id uuid not null references subscriptions(id),
+  subscription_id uuid not null references subscriptions(id) on delete cascade,
   angefordert_am timestamptz not null default now(),
   wirksam_zum timestamptz not null,
   bestaetigungstext text
