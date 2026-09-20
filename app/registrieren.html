@@ -196,7 +196,9 @@
       document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + ".";
       document.getElementById("paypal-button-container").innerHTML =
         '<p class="status on erfolg">Du hast bereits ein Abo — kein weiterer Kauf nötig.</p>' +
-        '<a href="/nutzer/" class="btn" style="display:block;text-decoration:none;text-align:center;font-size:20px;padding:20px">🚀 Zur App</a>' +
+        '<a href="/nutzer/" class="btn" style="display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none;font-size:20px;padding:20px;background:#e23c22;color:#fff">' +
+          '<img src="/icon-192.png" alt="" width="32" height="32" style="border-radius:6px">Löschmeier' +
+        '</a>' +
         '<a href="/kundenbereich.html" class="btn" style="display:block;text-decoration:none;text-align:center;background:transparent;border:1px solid var(--border);color:var(--muted);font-weight:400;margin-top:10px">Kundenbereich</a>';
       return;
     }
