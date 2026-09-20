@@ -180,6 +180,9 @@ export default {
       if (url.pathname === "/api/abo-anlegen" && request.method === "POST") {
         return await aboAnlegen(request, env);
       }
+      if (url.pathname.startsWith("/api/admin/")) {
+        return await adminAnfrage(request, env, url);
+      }
       return json({ fehler: "Unbekannter Pfad" }, 404);
     } catch (e) {
       console.error(e);
@@ -559,4 +562,113 @@ async function taeglicherAbgleich(env) {
       aktualisiert_am: jetzt,
     });
   }
+}
+
+// ---------- Admin-Bereich ----------
+// Schutz per einfachem Passwort (env.ADMIN_PASSWORT), da nur eine Person
+// (der Betreiber) Zugriff braucht - kein eigenes Nutzerkonto-System noetig.
+
+function adminAutorisiert(request, env) {
+  const passwort = request.headers.get("X-Admin-Passwort") || "";
+  return env.ADMIN_PASSWORT && passwort === env.ADMIN_PASSWORT;
+}
+
+async function adminAnfrage(request, env, url) {
+  if (!adminAutorisiert(request, env)) {
+    return json({ fehler: "nicht_autorisiert" }, 401);
+  }
+
+  const db = supabaseClient(env);
+  const pfad = url.pathname;
+
+  if (pfad === "/api/admin/uebersicht" && request.method === "GET") {
+    return json(await adminUebersicht(db));
+  }
+  if (pfad === "/api/admin/kunden" && request.method === "GET") {
+    const kunden = await db.select(
+      "subscriptions",
+      "select=id,status,beginn,naechste_zahlung,bezahlt_bis,gekuendigt_am,manuell_gesperrt,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent)&order=erstellt_am.desc"
+    );
+    return json(kunden);
+  }
+  if (pfad === "/api/admin/sperren" && request.method === "POST") {
+    return await adminAktion(request, env, db, "sperren", { manuell_gesperrt: true });
+  }
+  if (pfad === "/api/admin/entsperren" && request.method === "POST") {
+    return await adminAktion(request, env, db, "entsperren", { manuell_gesperrt: false });
+  }
+  if (pfad === "/api/admin/kulanz-verlaengern" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const tage = parseInt(body.tage || "3", 10);
+    const kulanzBis = new Date(Date.now() + tage * 86400000).toISOString();
+    return await adminAktion(request, env, db, "kulanz_verlaengert", {
+      status: "kulanzzeit",
+      kulanz_bis: kulanzBis,
+    });
+  }
+  if (pfad === "/api/admin/geraete-zuruecksetzen" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    if (!body.customer_id) return json({ fehler: "fehlende_angaben" }, 400);
+    return await adminGeraeteZuruecksetzen(env, db, body.customer_id);
+  }
+
+  return json({ fehler: "unbekannter_admin_pfad" }, 404);
+}
+
+async function adminUebersicht(db) {
+  const alle = await db.select("subscriptions", "select=status,tariffs(preis_cent)");
+  const zaehler = {};
+  let monatsUmsatzCent = 0;
+  for (const s of alle) {
+    zaehler[s.status] = (zaehler[s.status] || 0) + 1;
+    if (s.status === "aktiv") monatsUmsatzCent += s.tariffs?.preis_cent || 0;
+  }
+  const fehlerhafteWebhooks = await db.select(
+    "webhook_events",
+    "select=id&ergebnis=eq.fehler&order=verarbeitet_am.desc&limit=20"
+  );
+  return {
+    gesamtKunden: alle.length,
+    proStatus: zaehler,
+    monatsUmsatzCent,
+    webhookFehlerAnzahl: fehlerhafteWebhooks.length,
+  };
+}
+
+async function adminAktion(request, env, db, aktionsName, patch) {
+  const body = await request.json().catch(() => ({}));
+  if (!body.subscription_id) return json({ fehler: "fehlende_angaben" }, 400);
+
+  await db.update("subscriptions", `id=eq.${body.subscription_id}`, {
+    ...patch,
+    aktualisiert_am: new Date().toISOString(),
+  });
+  await db.insert("admin_actions", [
+    {
+      admin_name: "Joerg",
+      aktion: aktionsName,
+      subscription_id: body.subscription_id,
+      details: body.notiz || null,
+    },
+  ]);
+  return json({ status: "ok" });
+}
+
+async function adminGeraeteZuruecksetzen(env, db, customerId) {
+  const geraete = await db.select("devices", `customer_id=eq.${customerId}&select=id`);
+  for (const g of geraete) {
+    await db.update("devices", `id=eq.${g.id}`, { bestaetigt: false });
+  }
+  // Loeschen statt nur markieren, damit sofort wieder neue Geraete moeglich sind.
+  await fetch(`${env.SUPABASE_URL}/rest/v1/devices?customer_id=eq.${customerId}`, {
+    method: "DELETE",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: "Bearer " + env.SUPABASE_SERVICE_ROLE_KEY,
+    },
+  });
+  await db.insert("admin_actions", [
+    { admin_name: "Joerg", aktion: "geraete_zurueckgesetzt", customer_id: customerId },
+  ]);
+  return json({ status: "ok" });
 }

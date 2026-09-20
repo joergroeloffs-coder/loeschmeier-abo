@@ -48,8 +48,8 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
       PayPal-Abo abgeschlossen → Webhook kam an → Status automatisch auf
       "aktiv" gesetzt — Kernfunktion des ganzen Systems bestätigt
 - [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
-- [ ] Kundenbereich (Abo-Status ansehen, Geräte verwalten, kündigen)
-- [ ] Admin-Bereich
+- [x] Kundenbereich (`app/kundenbereich.html`): Abo-Status, Geräte, Kündigung
+- [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — **noch zu deployen, siehe unten**
 - [ ] E-Mail-Versand (Bestätigungen, Kündigung, Sperrung, ...)
 - [ ] Rechtliche Seiten (Impressum/Datenschutz/AGB/Widerruf) für dieses Produkt
 - [ ] Rechnungsstellung

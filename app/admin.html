@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Löschmeier Test — Admin</title>
+<style>
+  :root{
+    --bg:#0d1116; --card:#161b22; --border:#2a313c;
+    --text:#e6edf3; --muted:#93a3b3; --signal:#2fa4ff; --preis:#4fd18b; --fehler:#e0554a; --warnung:#e0a13a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    padding:32px 20px;
+  }
+  h1{font-size:22px; margin:0 0 20px}
+  h2{font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:32px 0 12px}
+
+  #login-bereich{max-width:360px; margin:80px auto}
+  input{
+    width:100%; background:var(--card); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:15px;
+  }
+  button{
+    background:var(--signal); color:#0d1116; border:0; border-radius:8px;
+    padding:11px 16px; font-weight:700; font-size:14px; cursor:pointer; margin-top:10px;
+  }
+  button.klein{padding:6px 10px; font-size:12px; margin:0 4px 0 0}
+  button.gefahr{background:var(--fehler); color:#fff}
+  button.gruen{background:var(--preis); color:#0d1116}
+
+  .kacheln{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px}
+  .kachel{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px}
+  .kachel .zahl{font-size:26px; font-weight:700}
+  .kachel .label{font-size:12px; color:var(--muted); margin-top:4px}
+
+  table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px}
+  th, td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap}
+  th{color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
+  tr:hover{background:#1a212b}
+  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700}
+  .badge.aktiv{background:#173a29; color:var(--preis)}
+  .badge.warnung{background:#3a2f17; color:var(--warnung)}
+  .badge.fehler{background:#3a1c1c; color:var(--fehler)}
+
+  #tabelle-wrapper{overflow-x:auto}
+</style>
+</head>
+<body>
+
+<div id="login-bereich">
+  <h1>Admin-Login</h1>
+  <input type="password" id="passwort" placeholder="Admin-Passwort">
+  <button id="login-btn">Anmelden</button>
+  <p id="login-fehler" style="color:var(--fehler); font-size:13px"></p>
+</div>
+
+<div id="admin-bereich" style="display:none">
+  <h1>Löschmeier Test — Admin</h1>
+
+  <h2>Überblick</h2>
+  <div class="kacheln" id="kacheln"></div>
+
+  <h2>Kunden</h2>
+  <div id="tabelle-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>E-Mail</th><th>Tarif</th><th>Status</th><th>Beginn</th>
+          <th>Bezahlt bis</th><th>Notiz</th><th>Aktionen</th>
+        </tr>
+      </thead>
+      <tbody id="kunden-tabelle"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  const WORKER_URL = "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
+  let ADMIN_PASSWORT = "";
+
+  const STATUS_TEXT = {
+    unbezahlt: ["Unbezahlt", "warnung"], wird_geprueft: ["Wird geprüft", "warnung"],
+    aktiv: ["Aktiv", "aktiv"], ueberfaellig: ["Überfällig", "fehler"],
+    kulanzzeit: ["Kulanzzeit", "warnung"], gekuendigt_zum_ende: ["Gekündigt", "warnung"],
+    gesperrt: ["Gesperrt", "fehler"], abgelaufen: ["Abgelaufen", "fehler"],
+    erstattet: ["Erstattet", "fehler"], manuell_gesperrt: ["Manuell gesperrt", "fehler"],
+  };
+
+  function formatDatum(iso){
+    if(!iso) return "–";
+    return new Date(iso).toLocaleDateString("de-DE");
+  }
+
+  async function adminFetch(pfad, options = {}){
+    const res = await fetch(WORKER_URL + pfad, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Passwort": ADMIN_PASSWORT,
+        ...(options.headers || {}),
+      },
+    });
+    return res;
+  }
+
+  document.getElementById("login-btn").addEventListener("click", async () => {
+    ADMIN_PASSWORT = document.getElementById("passwort").value;
+    const res = await adminFetch("/api/admin/uebersicht");
+    if(res.ok){
+      sessionStorage.setItem("admin_passwort", ADMIN_PASSWORT);
+      document.getElementById("login-bereich").style.display = "none";
+      document.getElementById("admin-bereich").style.display = "block";
+      ladeAlles();
+    } else {
+      document.getElementById("login-fehler").textContent = "Falsches Passwort.";
+    }
+  });
+
+  async function ladeAlles(){
+    const uebersichtRes = await adminFetch("/api/admin/uebersicht");
+    const uebersicht = await uebersichtRes.json();
+
+    const kacheln = [
+      { zahl: uebersicht.gesamtKunden, label: "Kunden gesamt" },
+      { zahl: uebersicht.proStatus.aktiv || 0, label: "Aktiv" },
+      { zahl: uebersicht.proStatus.gekuendigt_zum_ende || 0, label: "Gekündigt (laufend)" },
+      { zahl: uebersicht.proStatus.ueberfaellig || 0, label: "Überfällig" },
+      { zahl: uebersicht.proStatus.kulanzzeit || 0, label: "In Kulanzzeit" },
+      { zahl: uebersicht.proStatus.gesperrt || 0, label: "Gesperrt" },
+      { zahl: (uebersicht.monatsUmsatzCent / 100).toFixed(2) + " €", label: "Monatsumsatz (aktiv)" },
+      { zahl: uebersicht.webhookFehlerAnzahl, label: "Webhook-Fehler" },
+    ];
+    document.getElementById("kacheln").innerHTML = kacheln.map(k =>
+      `<div class="kachel"><div class="zahl">${k.zahl}</div><div class="label">${k.label}</div></div>`
+    ).join("");
+
+    const kundenRes = await adminFetch("/api/admin/kunden");
+    const kunden = await kundenRes.json();
+    document.getElementById("kunden-tabelle").innerHTML = kunden.map(k => {
+      const [text, art] = STATUS_TEXT[k.status] || [k.status, "warnung"];
+      return `
+        <tr>
+          <td>${k.customer_profiles?.email || "–"}</td>
+          <td>${k.tariffs?.bezeichnung || "–"}</td>
+          <td><span class="badge ${art}">${text}</span>${k.manuell_gesperrt ? ' <span class="badge fehler">manuell gesperrt</span>' : ""}</td>
+          <td>${formatDatum(k.beginn)}</td>
+          <td>${formatDatum(k.bezahlt_bis)}</td>
+          <td>${k.notiz || ""}</td>
+          <td>
+            ${k.manuell_gesperrt
+              ? `<button class="klein gruen" onclick="entsperren('${k.id}')">Entsperren</button>`
+              : `<button class="klein gefahr" onclick="sperren('${k.id}')">Sperren</button>`
+            }
+            <button class="klein" onclick="kulanzVerlaengern('${k.id}')">+3 Tage Kulanz</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function sperren(id){
+    if(!confirm("Diesen Kunden wirklich manuell sperren?")) return;
+    await adminFetch("/api/admin/sperren", { method: "POST", body: JSON.stringify({ subscription_id: id }) });
+    ladeAlles();
+  }
+  async function entsperren(id){
+    await adminFetch("/api/admin/entsperren", { method: "POST", body: JSON.stringify({ subscription_id: id }) });
+    ladeAlles();
+  }
+  async function kulanzVerlaengern(id){
+    await adminFetch("/api/admin/kulanz-verlaengern", { method: "POST", body: JSON.stringify({ subscription_id: id, tage: 3 }) });
+    ladeAlles();
+  }
+
+  // Angemeldet bleiben innerhalb der Browser-Sitzung (nicht dauerhaft).
+  const gespeichert = sessionStorage.getItem("admin_passwort");
+  if(gespeichert){
+    ADMIN_PASSWORT = gespeichert;
+    adminFetch("/api/admin/uebersicht").then(res => {
+      if(res.ok){
+        document.getElementById("login-bereich").style.display = "none";
+        document.getElementById("admin-bereich").style.display = "block";
+        ladeAlles();
+      }
+    });
+  }
+</script>
+
+</body>
+</html>
