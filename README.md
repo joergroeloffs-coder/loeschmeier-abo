@@ -49,7 +49,7 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
       "aktiv" gesetzt — Kernfunktion des ganzen Systems bestätigt
 - [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
 - [x] Kundenbereich (`app/kundenbereich.html`): Abo-Status, Geräte, Kündigung
-- [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — **noch zu deployen, siehe unten**
+- [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — getestet, funktioniert
 - [ ] E-Mail-Versand (Bestätigungen, Kündigung, Sperrung, ...)
 - [ ] Rechtliche Seiten (Impressum/Datenschutz/AGB/Widerruf) für dieses Produkt
 - [ ] Rechnungsstellung
