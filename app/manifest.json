@@ -1,7 +1,7 @@
 {
   "name": "Löschmeier Test",
   "short_name": "Löschmeier Test",
-  "start_url": "./index.html",
+  "start_url": "./verwaltung.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0d1116",

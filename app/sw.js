@@ -1,10 +1,10 @@
 "use strict";
 importScripts("./config.js");
-const SHELL_CACHE = "shell-v23-config";
+const SHELL_CACHE = "shell-v24-config";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",
-  "./index.html",
+  "./verwaltung.html",
   "./config.js",
   "./manifest.json",
   "./icon.svg",
@@ -143,7 +143,7 @@ self.addEventListener("fetch", event => {
           caches.open(SHELL_CACHE).then(cache => cache.put(event.request, copy));
         }
         return res;
-      }).catch(() => caches.match(event.request).then(hit => hit || caches.match("./index.html")))
+      }).catch(() => caches.match(event.request).then(hit => hit || caches.match("./verwaltung.html")))
     );
   }
 });
