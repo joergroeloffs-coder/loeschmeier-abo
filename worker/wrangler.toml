@@ -1,0 +1,21 @@
+name = "loeschmeier-abo-worker"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Nicht-geheime Werte duerfen hier stehen (Client ID, URLs).
+[vars]
+SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g"
+PAYPAL_CLIENT_ID = "AVbDi3EuNbQry_liS-9_07-8tD73Zh11vmJwOoCL_7JTmNMqwCY0tHtSxFqqEzmGK9g82OKqfhaOHUR7"
+PAYPAL_API_BASE = "https://api-m.sandbox.paypal.com"
+KULANZ_TAGE = "3"
+
+# Geheime Werte NICHT hier eintragen. Stattdessen im Cloudflare-Dashboard:
+# Worker -> Settings -> Variables and Secrets -> "Add" -> Typ "Secret":
+#   SUPABASE_SERVICE_ROLE_KEY   (Supabase -> Project Settings -> API -> service_role)
+#   PAYPAL_SECRET               (PayPal Developer -> App -> Secret)
+#   PAYPAL_WEBHOOK_ID           (wird bei der Webhook-Einrichtung vergeben, s. unten)
+
+# Taeglicher Abgleich mit PayPal (faengt ausgefallene Webhooks ab)
+[triggers]
+crons = ["0 3 * * *"]

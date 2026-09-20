@@ -39,10 +39,12 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 
 - [x] Repo angelegt, bestehende Test-App als Basis übernommen
 - [x] Datenmodell entworfen
-- [ ] Supabase-Projekt (**dein nächster Schritt**, siehe unten)
-- [ ] PayPal-Sandbox-App (**dein nächster Schritt**, siehe unten)
-- [ ] Cloudflare Worker: Webhook-Verarbeitung
-- [ ] Cloudflare Worker: Zugriffsprüfung
+- [x] Supabase-Projekt angelegt und Schema eingespielt
+- [x] PayPal-Sandbox-App vorhanden (Client ID hinterlegt)
+- [x] Cloudflare Worker: Webhook-Verarbeitung (Code fertig, noch nicht deployt)
+- [x] Cloudflare Worker: Zugriffsprüfung + Kündigung (Code fertig, noch nicht deployt)
+- [ ] **Cloudflare Worker deployen** (dein nächster Schritt, siehe unten)
+- [ ] **PayPal-Webhook in der Sandbox-App einrichten** (dein nächster Schritt, siehe unten)
 - [ ] Login/Kundenbereich in der App
 - [ ] Admin-Bereich
 - [ ] E-Mail-Versand
@@ -50,26 +52,42 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [ ] Tests in der Sandbox
 - [ ] Live-Umstellung
 
-## Nächste Schritte für dich (unvermeidbar manuell)
+## Worker-Code
 
-### 1. Supabase-Projekt anlegen
-1. Auf supabase.com kostenlos registrieren
-2. "New Project" → Name z.B. `loeschmeier-test`, Region `Frankfurt (eu-central-1)`
-3. Ein Datenbank-Passwort wird generiert — das brauche ich NICHT, das bleibt bei dir
-4. Nach Erstellung: im Menü "SQL Editor" öffnen, Inhalt von `db/schema.sql`
-   einfügen und ausführen
-5. Im Menü "Project Settings" → "API": mir bitte **nur** die "Project URL"
-   und den **"anon public"**-Key nennen (nicht den "service_role"-Key — der
-   ist geheim und kommt später direkt in Cloudflare, nie in den Chat)
+Liegt in `worker/`. Nicht-geheime Werte (Supabase-URL, anon-Key, PayPal
+Client ID) stehen bereits in `worker/wrangler.toml`. Drei geheime Werte
+fehlen noch — die trägst du direkt im Cloudflare-Dashboard ein, nie hier
+im Repo oder im Chat:
 
-### 2. PayPal-Entwickler-App (Sandbox)
-1. Auf developer.paypal.com mit deinem PayPal-Business-Konto einloggen
-2. "Apps & Credentials" → Reiter "Sandbox" → "Create App"
-3. Name z.B. `loeschmeier-test`
-4. Mir bitte **nur** die "Client ID" nennen (nicht den "Secret" — der kommt
-   später direkt in Cloudflare, nie in den Chat)
-5. Unter "Sandbox" → "Accounts" prüfen, ob ein Test-Käufer-Konto existiert
-   (wird meist automatisch angelegt) — für spätere Testkäufe
+- `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Project Settings → API → service_role
+- `PAYPAL_SECRET` — PayPal Developer → App → Secret (das, was du mir NICHT genannt hast)
+- `PAYPAL_WEBHOOK_ID` — entsteht erst beim Einrichten des Webhooks (nächster Schritt)
 
-Sobald diese beiden Punkte stehen, baue ich den Cloudflare Worker und die
-Login-/Kundenbereich-Seiten.
+## Nächste Schritte für dich
+
+### 1. Worker bei Cloudflare anlegen und deployen
+1. Auf dash.cloudflare.com einloggen (dein bestehendes Cloudflare-Konto,
+   das du schon für den Wasserentnahme-Zugang-Worker nutzt)
+2. "Workers & Pages" → "Create" → "Create Worker" → Name: `loeschmeier-abo-worker`
+3. Im Worker-Editor: kompletten Inhalt von `worker/src/index.js`,
+   `worker/src/supabase.js` und `worker/src/paypal.js` einfügen — am
+   einfachsten, wenn du mir sagst, dass du bereit bist, dann gebe ich dir
+   die genaue Klick-für-Klick-Anleitung für den Dashboard-Editor (der
+   kennt standardmäßig nur eine Datei, dafür braucht es einen Kniff)
+4. Unter "Settings" → "Variables and Secrets": die drei geheimen Werte
+   oben als **Secret** eintragen (nicht als normale Variable)
+5. Unter "Triggers" → "Cron Triggers": `0 3 * * *` eintragen (täglicher
+   Abgleich um 3 Uhr nachts)
+
+### 2. PayPal-Webhook einrichten
+1. developer.paypal.com → deine Sandbox-App öffnen → "Add Webhook"
+2. URL: `https://<deine-worker-adresse>.workers.dev/webhook/paypal`
+3. Ereignisse auswählen: `BILLING.SUBSCRIPTION.ACTIVATED`,
+   `BILLING.SUBSCRIPTION.CANCELLED`, `BILLING.SUBSCRIPTION.SUSPENDED`,
+   `BILLING.SUBSCRIPTION.EXPIRED`, `BILLING.SUBSCRIPTION.PAYMENT.FAILED`,
+   `PAYMENT.SALE.COMPLETED`, `PAYMENT.SALE.REFUNDED`
+4. Die dabei erzeugte **Webhook ID** mir nennen (die ist nicht geheim,
+   nur zur Zuordnung) — kommt dann als dritter Secret-Wert in Cloudflare
+
+Sag Bescheid, wenn du bereit für Schritt 1 bist, dann führe ich dich durch
+den Cloudflare-Editor.
