@@ -340,12 +340,18 @@ async function verarbeiteEreignis(db, env, ereignis) {
     }
 
     case "PAYMENT.SALE.REFUNDED": {
-      await db.update("payments", `paypal_capture_id=eq.${resource.sale_id}`, {
-        status: "erstattet",
-      });
-      const subId = resource.billing_agreement_id;
-      if (subId) {
-        await db.update("subscriptions", `paypal_subscription_id=eq.${subId}`, {
+      // PayPal liefert im Refund-Webhook keine verlaessliche billing_agreement_id
+      // mit - die Zuordnung zum Abo holen wir stattdessen ueber unsere eigene
+      // payments-Tabelle (subscription_id war dort schon beim urspruenglichen
+      // Zahlungseingang gespeichert).
+      const urspruenglicheSaleId = resource.sale_id || resource.parent_payment;
+      const aktualisiertePayments = await db.update(
+        "payments",
+        `paypal_capture_id=eq.${urspruenglicheSaleId}`,
+        { status: "erstattet" }
+      );
+      if (aktualisiertePayments.length > 0) {
+        await db.update("subscriptions", `id=eq.${aktualisiertePayments[0].subscription_id}`, {
           status: "erstattet",
           aktualisiert_am: new Date().toISOString(),
         });
