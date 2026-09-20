@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Löschmeier Test — Registrieren</title>
+<style>
+  :root{
+    --bg:#0d1116; --card:#161b22; --border:#2a313c;
+    --text:#e6edf3; --muted:#93a3b3; --signal:#2fa4ff; --preis:#4fd18b; --fehler:#e0554a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding:48px 20px;
+  }
+  header{text-align:center; margin-bottom:8px; max-width:440px}
+  h1{font-size:26px; margin:0 0 8px; letter-spacing:-0.5px}
+  p.sub{color:var(--muted); margin:0; font-size:15px; line-height:1.5}
+
+  .karte{
+    background:var(--card); border:1px solid var(--border); border-radius:16px;
+    padding:28px 24px; width:100%; max-width:440px; margin-top:28px;
+  }
+  .preis{font-size:32px; font-weight:700; color:var(--preis); margin:0 0 4px}
+  .preis span{font-size:14px; color:var(--muted); font-weight:400}
+
+  input{
+    width:100%; background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:12px 14px;
+    font-size:15px; margin-top:6px;
+  }
+  label{font-size:13px; color:var(--muted)}
+  button.btn{
+    display:block; width:100%; margin-top:14px;
+    background:var(--signal); color:#0d1116; text-align:center; border:0;
+    padding:14px; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer;
+  }
+  button.btn:disabled{opacity:0.5; cursor:default}
+
+  .status{margin-top:16px; font-size:14px; padding:12px 14px; border-radius:8px; display:none}
+  .status.on{display:block}
+  .status.info{background:#1a2733; color:var(--text)}
+  .status.fehler{background:#3a1c1c; color:var(--fehler)}
+  .status.erfolg{background:#173a29; color:var(--preis)}
+
+  footer{margin-top:40px; font-size:12px; color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Löschmeier Test</h1>
+  <p class="sub">Digitale Wasserentnahmestellen-Karte — Testversion mit echtem Abo.</p>
+</header>
+
+<div class="karte" id="login-karte">
+  <p class="preis">1&nbsp;€ <span>/ Monat, jederzeit kündbar</span></p>
+  <label for="email">E-Mail-Adresse</label>
+  <input type="email" id="email" placeholder="du@beispiel.de" autocomplete="email">
+  <button class="btn" id="link-senden">Anmelde-Link senden</button>
+  <div class="status" id="login-status"></div>
+</div>
+
+<div class="karte" id="abo-karte" style="display:none">
+  <p class="sub" id="eingeloggt-als"></p>
+  <div id="paypal-button-container" style="margin-top:16px"></div>
+  <div class="status" id="abo-status"></div>
+</div>
+
+<footer>© Löschmeier Test · <a href="/kundenbereich.html" style="color:inherit">Kundenbereich</a></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+  // Nicht geheime, oeffentliche Konfigurationswerte.
+  const SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g";
+  const WORKER_URL = "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
+  const PAYPAL_CLIENT_ID = "AVbDi3EuNbQry_liS-9_07-8tD73Zh11vmJwOoCL_7JTmNMqwCY0tHtSxFqqEzmGK9g82OKqfhaOHUR7";
+  const PLAN_ID = "P-15V30827XW664200TNKX3OCY";
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function zeigeStatus(el, text, art){
+    el.textContent = text;
+    el.className = "status on " + art;
+  }
+
+  document.getElementById("link-senden").addEventListener("click", async () => {
+    const email = document.getElementById("email").value.trim();
+    const statusEl = document.getElementById("login-status");
+    if(!email){ zeigeStatus(statusEl, "Bitte E-Mail-Adresse eingeben.", "fehler"); return; }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.href }
+    });
+    if(error){
+      zeigeStatus(statusEl, "Fehler: " + error.message, "fehler");
+    } else {
+      zeigeStatus(statusEl, "Link verschickt — bitte E-Mail-Postfach öffnen und Link anklicken.", "erfolg");
+    }
+  });
+
+  async function ladePaypalButton(){
+    const script = document.createElement("script");
+    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=EUR`;
+    document.body.appendChild(script);
+    await new Promise(resolve => { script.onload = resolve; });
+
+    paypal.Buttons({
+      style: { shape: "pill", color: "blue", layout: "vertical", label: "subscribe" },
+      createSubscription: function(data, actions){
+        return actions.subscription.create({ plan_id: PLAN_ID });
+      },
+      onApprove: async function(data){
+        const statusEl = document.getElementById("abo-status");
+        zeigeStatus(statusEl, "Zahlung bestätigt — Abo wird eingerichtet ...", "info");
+
+        const { data: sitzung } = await supabase.auth.getSession();
+        const res = await fetch(WORKER_URL + "/api/abo-anlegen", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + sitzung.session.access_token,
+          },
+          body: JSON.stringify({ paypal_subscription_id: data.subscriptionID, tariff_code: "monat" }),
+        });
+        if(res.ok){
+          zeigeStatus(statusEl, "Fertig! Die Freischaltung erfolgt automatisch, sobald PayPal die erste Zahlung bestätigt (meist innerhalb weniger Sekunden). Danach: Kundenbereich öffnen.", "erfolg");
+        } else {
+          zeigeStatus(statusEl, "Zahlung war erfolgreich, aber Abo konnte nicht angelegt werden. Bitte Support kontaktieren.", "fehler");
+        }
+      },
+      onError: function(err){
+        document.getElementById("abo-status").textContent = "";
+        zeigeStatus(document.getElementById("abo-status"), "PayPal-Fehler: " + err, "fehler");
+      }
+    }).render("#paypal-button-container");
+  }
+
+  async function pruefeLoginZustand(){
+    const { data: { session } } = await supabase.auth.getSession();
+    if(session){
+      document.getElementById("login-karte").style.display = "none";
+      document.getElementById("abo-karte").style.display = "block";
+      document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + " — jetzt Abo abschließen:";
+      ladePaypalButton();
+    }
+  }
+
+  supabase.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
+  pruefeLoginZustand();
+</script>
+
+</body>
+</html>
