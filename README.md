@@ -62,7 +62,9 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [ ] **Offen: Admin-Login ohne Rate Limiting** (Passwort theoretisch erratbar) —
       Cloudflare-Dashboard-Regel empfohlen, siehe unten
 - [ ] Rechnungsstellung
-- [ ] Weitere Testfälle (Kündigung, Zahlungsausfall, Rückerstattung, Gerätelimit, ...)
+- [x] Testfall: Kündigung im Kundenbereich — bestätigt (PayPal storniert, Zugang bis Vertragsende)
+- [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
+- [ ] Weitere Testfälle (Zahlungsausfall, Rückerstattung)
 - [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
 
 ## Bekannte offene Sicherheitslücke: Admin-Login
