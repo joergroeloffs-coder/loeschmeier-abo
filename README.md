@@ -38,19 +38,23 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 ## Status
 
 - [x] Repo angelegt, bestehende Test-App als Basis übernommen
-- [x] Datenmodell entworfen
-- [x] Supabase-Projekt angelegt und Schema eingespielt
-- [x] PayPal-Sandbox-App vorhanden (Client ID hinterlegt)
-- [x] Cloudflare Worker: Webhook-Verarbeitung (Code fertig, noch nicht deployt)
-- [x] Cloudflare Worker: Zugriffsprüfung + Kündigung (Code fertig, noch nicht deployt)
-- [ ] **Cloudflare Worker deployen** (dein nächster Schritt, siehe unten)
-- [ ] **PayPal-Webhook in der Sandbox-App einrichten** (dein nächster Schritt, siehe unten)
-- [ ] Login/Kundenbereich in der App
+- [x] Datenmodell entworfen und eingespielt (inkl. Row Level Security)
+- [x] Supabase-Projekt eingerichtet (Auth, Datenbank)
+- [x] PayPal-Sandbox-App + Produkt/Preisplan angelegt (1 €/Monat)
+- [x] Cloudflare Worker deployt (Webhook, Zugriffsprüfung, Kündigung, täglicher Abgleich)
+- [x] PayPal-Webhook eingerichtet und verifiziert
+- [x] Registrierungs-/Kaufseite (`app/registrieren.html`), live auf Cloudflare Pages
+- [x] **Erster kompletter Testkauf erfolgreich**: Anmeldung per E-Mail-Link →
+      PayPal-Abo abgeschlossen → Webhook kam an → Status automatisch auf
+      "aktiv" gesetzt — Kernfunktion des ganzen Systems bestätigt
+- [ ] Eigene Domain (`test.roewise.com`) statt `pages.dev`/`workers.dev`
+- [ ] Kundenbereich (Abo-Status ansehen, Geräte verwalten, kündigen)
 - [ ] Admin-Bereich
-- [ ] E-Mail-Versand
-- [ ] Verkaufsseite
-- [ ] Tests in der Sandbox
-- [ ] Live-Umstellung
+- [ ] E-Mail-Versand (Bestätigungen, Kündigung, Sperrung, ...)
+- [ ] Rechtliche Seiten (Impressum/Datenschutz/AGB/Widerruf) für dieses Produkt
+- [ ] Rechnungsstellung
+- [ ] Weitere Testfälle (Kündigung, Zahlungsausfall, Rückerstattung, Gerätelimit, ...)
+- [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
 
 ## Worker-Code
 
