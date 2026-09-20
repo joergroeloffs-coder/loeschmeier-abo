@@ -59,8 +59,7 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
       Abo-Prüfung nutzbar — jetzt an `/api/zugriff` gekoppelt (`app/zugriffspruefung.js`),
       inkl. 24h-Offline-Gnadenfrist für Einsatzsituationen
 - [x] XSS-Härtung im Admin-Bereich (E-Mail/Notiz-Felder werden jetzt escaped)
-- [ ] **Offen: Admin-Login ohne Rate Limiting** (Passwort theoretisch erratbar) —
-      Cloudflare-Dashboard-Regel empfohlen, siehe unten
+- [x] Admin-Login gegen Rate Limiting abgesichert (KV-basiert, max. 30 Anfragen/Minute/IP)
 - [ ] Rechnungsstellung
 - [x] Testfall: Kündigung im Kundenbereich — bestätigt (PayPal storniert, Zugang bis Vertragsende)
 - [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
@@ -88,13 +87,12 @@ https://test.roewise.com/verwaltung.html
 (Vorher war das unter der Wurzel-Adresse selbst erreichbar — das war
 öffentlich sichtbar und ist jetzt behoben.)
 
-## Bekannte offene Sicherheitslücke: Admin-Login
+## Admin-Login: Rate Limiting
 
-`admin.html` schützt nur per Passwortvergleich, ohne Begrenzung der Versuche.
-Empfehlung: im Cloudflare-Dashboard unter "Security" → "WAF" → "Rate limiting
-rules" eine Regel für `/api/admin/*` anlegen (z.B. max. 5 Anfragen/Minute pro
-IP). Das ist ein Klick-Vorgang im Dashboard, kein Code nötig — sag Bescheid,
-wenn du so weit bist, dann führe ich dich durch.
+`admin.html`/`/api/admin/*` sind jetzt zusätzlich über einen KV-Speicher
+(`RATE_KV`, Namespace `loeschmeier-admin-rate`) gegen Passwort-Brute-Force
+abgesichert: max. 30 Anfragen pro Minute und IP, danach kurzzeitige Sperre
+(HTTP 429).
 
 ## Worker-Code
 
