@@ -66,6 +66,23 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
 - [ ] Weitere Testfälle (Zahlungsausfall, Rückerstattung)
 - [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
+- [x] Kunde kann eigene Geräte selbst entfernen (`app/kundenbereich.html`)
+- [x] **Fix**: `test.roewise.com` (Wurzel-Adresse) zeigte bisher direkt die
+      interne Hauptversion (Datenpflege-Tool) statt einer Registrierungsseite —
+      Hauptversion liegt jetzt unter `/verwaltung.html`, Wurzel leitet zu
+      `/registrieren.html` weiter
+
+## Deine Hauptversion (Datenpflege-Tool)
+
+Nach der Umbenennung erreichst du dein persönliches Werkzeug zum Pflegen der
+Stellen-Daten jetzt unter:
+
+```
+https://test.roewise.com/verwaltung.html
+```
+
+(Vorher war das unter der Wurzel-Adresse selbst erreichbar — das war
+öffentlich sichtbar und ist jetzt behoben.)
 
 ## Bekannte offene Sicherheitslücke: Admin-Login
 
