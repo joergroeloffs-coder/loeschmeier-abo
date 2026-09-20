@@ -30,6 +30,9 @@ export default {
       if (url.pathname === "/api/kuendigen" && request.method === "POST") {
         return await kundeKuendigt(request, env);
       }
+      if (url.pathname === "/api/geraet-entfernen" && request.method === "POST") {
+        return await kundeEntferntGeraet(request, env);
+      }
       if (url.pathname === "/api/abo-anlegen" && request.method === "POST") {
         return await aboAnlegen(request, env);
       }
@@ -368,6 +371,33 @@ async function kundeKuendigt(request, env) {
   ]);
 
   return json({ status: "gekuendigt", wirksam_zum: abo.bezahlt_bis });
+}
+
+// ---------- Geraet durch Kunden entfernen ----------
+
+async function kundeEntferntGeraet(request, env) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "");
+  const authUserId = await pruefeNutzerToken(env, accessToken);
+  if (!authUserId) return json({ fehler: "nicht_angemeldet" }, 401);
+
+  const body = await request.json().catch(() => ({}));
+  if (!body.device_id) return json({ fehler: "fehlende_angaben" }, 400);
+
+  const db = supabaseClient(env);
+  const profile = await db.select("customer_profiles", `auth_user_id=eq.${authUserId}&select=id`);
+  if (profile.length === 0) return json({ fehler: "kein_profil" }, 404);
+
+  // Nur loeschen, wenn das Geraet wirklich diesem Kunden gehoert (sonst
+  // koennte ein Kunde ueber eine geratene ID fremde Geraete entfernen).
+  const geraete = await db.select(
+    "devices",
+    `id=eq.${body.device_id}&customer_id=eq.${profile[0].id}&select=id`
+  );
+  if (geraete.length === 0) return json({ fehler: "geraet_nicht_gefunden" }, 404);
+
+  await db.delete("devices", `id=eq.${body.device_id}`);
+  return json({ status: "entfernt" });
 }
 
 // ---------- Taeglicher Abgleich (faengt ausgefallene Webhooks ab) ----------

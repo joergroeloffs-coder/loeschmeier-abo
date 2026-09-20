@@ -43,6 +43,9 @@ export function supabaseClient(env) {
         headers: { Prefer: "return=representation" },
         body: JSON.stringify(patch),
       }),
+
+    // Zeilen loeschen, die den Query-Filter erfuellen
+    delete: (table, query) => request(`/${table}?${query}`, { method: "DELETE" }),
   };
 }
 
