@@ -146,13 +146,27 @@ create table cancellations (
 );
 
 -- ---------- Row Level Security ----------
+-- Auf ALLEN Tabellen aktiviert. Tabellen ohne eigene Policy sind damit
+-- für anon/authenticated komplett gesperrt (nur der Worker mit dem
+-- Service-Role-Key kommt noch dran) - das betrifft absichtlich
+-- webhook_events, notifications, admin_actions, security_events: reine
+-- Backend-Protokolle, die kein Kunde je direkt lesen soll.
 alter table customer_profiles enable row level security;
+alter table tariffs enable row level security;
 alter table subscriptions enable row level security;
 alter table payments enable row level security;
 alter table invoices enable row level security;
 alter table devices enable row level security;
 alter table sessions enable row level security;
 alter table cancellations enable row level security;
+alter table webhook_events enable row level security;
+alter table notifications enable row level security;
+alter table admin_actions enable row level security;
+alter table security_events enable row level security;
+
+-- Tarife/Preise sind öffentlich sichtbar (auch ohne Login, für die Verkaufsseite)
+create policy "tarife_oeffentlich_lesbar" on tariffs
+  for select using (aktiv = true);
 
 -- Jeder Kunde sieht nur eigene Daten
 create policy "eigenes_profil" on customer_profiles
