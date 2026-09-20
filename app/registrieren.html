@@ -81,7 +81,7 @@
   const PAYPAL_CLIENT_ID = "AVbDi3EuNbQry_liS-9_07-8tD73Zh11vmJwOoCL_7JTmNMqwCY0tHtSxFqqEzmGK9g82OKqfhaOHUR7";
   const PLAN_ID = "P-15V30827XW664200TNKX3OCY";
 
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   function zeigeStatus(el, text, art){
     el.textContent = text;
@@ -93,7 +93,7 @@
     const statusEl = document.getElementById("login-status");
     if(!email){ zeigeStatus(statusEl, "Bitte E-Mail-Adresse eingeben.", "fehler"); return; }
 
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await sb.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: window.location.href }
     });
@@ -119,7 +119,7 @@
         const statusEl = document.getElementById("abo-status");
         zeigeStatus(statusEl, "Zahlung bestätigt — Abo wird eingerichtet ...", "info");
 
-        const { data: sitzung } = await supabase.auth.getSession();
+        const { data: sitzung } = await sb.auth.getSession();
         const res = await fetch(WORKER_URL + "/api/abo-anlegen", {
           method: "POST",
           headers: {
@@ -142,7 +142,7 @@
   }
 
   async function pruefeLoginZustand(){
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await sb.auth.getSession();
     if(session){
       document.getElementById("login-karte").style.display = "none";
       document.getElementById("abo-karte").style.display = "block";
@@ -151,7 +151,7 @@
     }
   }
 
-  supabase.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
+  sb.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
   pruefeLoginZustand();
 </script>
 
