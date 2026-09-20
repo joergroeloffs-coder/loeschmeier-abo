@@ -1,0 +1,3 @@
+*.tgz
+werkzeuge/zugangsdaten.json
+__pycache__/

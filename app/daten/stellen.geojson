@@ -1,0 +1,25 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {"type": "Point", "coordinates": [8.984, 54.751]},
+   "properties": {"ref": "T001", "typ": "Hydrant", "ortschaft": "Testort", "bezeichnung": "Test-Hydrant 1"}
+  },
+  {
+   "type": "Feature",
+   "geometry": {"type": "Point", "coordinates": [8.987, 54.752]},
+   "properties": {"ref": "T002", "typ": "Hydrant", "ortschaft": "Testort", "bezeichnung": "Test-Hydrant 2"}
+  },
+  {
+   "type": "Feature",
+   "geometry": {"type": "Point", "coordinates": [8.981, 54.749]},
+   "properties": {"ref": "T003", "typ": "Löschteich", "ortschaft": "Testort", "bezeichnung": "Test-Löschteich"}
+  },
+  {
+   "type": "Feature",
+   "geometry": {"type": "Point", "coordinates": [8.985, 54.748]},
+   "properties": {"ref": "T004", "typ": "Defibrillator", "ortschaft": "Testort", "bezeichnung": "Test-Defi"}
+  }
+ ]
+}
