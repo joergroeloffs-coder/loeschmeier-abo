@@ -145,14 +145,44 @@
     }).render("#paypal-button-container");
   }
 
+  async function hatBereitsAbo(session){
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: "Bearer " + session.access_token,
+    };
+    const profilRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/customer_profiles?select=id&auth_user_id=eq.${session.user.id}`,
+      { headers }
+    );
+    const profile = await profilRes.json();
+    if(!profile.length) return false;
+
+    const aboRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/subscriptions?select=status&customer_id=eq.${profile[0].id}&status=in.(aktiv,wird_geprueft,kulanzzeit,gekuendigt_zum_ende)&limit=1`,
+      { headers }
+    );
+    const abos = await aboRes.json();
+    return abos.length > 0;
+  }
+
   async function pruefeLoginZustand(){
     const { data: { session } } = await sb.auth.getSession();
-    if(session){
-      document.getElementById("login-karte").style.display = "none";
-      document.getElementById("abo-karte").style.display = "block";
-      document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + " — jetzt Abo abschließen:";
-      ladePaypalButton();
+    if(!session) return;
+
+    document.getElementById("login-karte").style.display = "none";
+    document.getElementById("abo-karte").style.display = "block";
+
+    if(await hatBereitsAbo(session)){
+      document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + ".";
+      document.getElementById("paypal-button-container").innerHTML =
+        '<p class="status on erfolg">Du hast bereits ein Abo — kein weiterer Kauf nötig.</p>' +
+        '<a href="/kundenbereich.html" class="btn" style="display:block;text-decoration:none;text-align:center">Zum Kundenbereich</a>' +
+        '<a href="/nutzer/" class="btn" style="display:block;text-decoration:none;text-align:center;background:var(--card);border:1px solid var(--border);color:var(--text)">Zur App</a>';
+      return;
     }
+
+    document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + " — jetzt Abo abschließen:";
+    ladePaypalButton();
   }
 
   sb.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
