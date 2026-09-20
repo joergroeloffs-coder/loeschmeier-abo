@@ -1,4 +1,4 @@
-import { supabaseClient, pruefeNutzerToken } from "./supabase.js";
+import { supabaseClient, pruefeNutzerToken, holeNutzer } from "./supabase.js";
 import { webhookIstEcht, holeAboDetails, kuendigeAbo } from "./paypal.js";
 
 const CORS_HEADERS = {
@@ -29,6 +29,9 @@ export default {
       }
       if (url.pathname === "/api/kuendigen" && request.method === "POST") {
         return await kundeKuendigt(request, env);
+      }
+      if (url.pathname === "/api/abo-anlegen" && request.method === "POST") {
+        return await aboAnlegen(request, env);
       }
       return json({ fehler: "Unbekannter Pfad" }, 404);
     } catch (e) {
@@ -263,6 +266,65 @@ async function pruefeZugriff(request, env) {
   }
 
   return json({ erlaubt: true, status: abo.status });
+}
+
+// ---------- Abo nach PayPal-Bestaetigung anlegen ----------
+// Wird aufgerufen, sobald der Kunde den PayPal-Button bestaetigt hat
+// (onApprove). Legt Kundenprofil (falls neu) und Abo mit Status
+// "wird_geprueft" an - erst der Webhook BILLING.SUBSCRIPTION.ACTIVATED
+// schaltet danach wirklich frei. Verhindert, dass allein die
+// Rueckleitung von PayPal Zugang gewaehrt.
+
+async function aboAnlegen(request, env) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "");
+  const nutzer = await holeNutzer(env, accessToken);
+  if (!nutzer) return json({ fehler: "nicht_angemeldet" }, 401);
+
+  const body = await request.json().catch(() => ({}));
+  const { paypal_subscription_id, tariff_code } = body;
+  if (!paypal_subscription_id || !tariff_code) {
+    return json({ fehler: "fehlende_angaben" }, 400);
+  }
+
+  const db = supabaseClient(env);
+
+  let profile = await db.select(
+    "customer_profiles",
+    `auth_user_id=eq.${nutzer.id}&select=id`
+  );
+  let customerId;
+  if (profile.length === 0) {
+    const neu = await db.insert("customer_profiles", [
+      { auth_user_id: nutzer.id, email: nutzer.email },
+    ]);
+    customerId = neu[0].id;
+  } else {
+    customerId = profile[0].id;
+  }
+
+  const tarife = await db.select("tariffs", `code=eq.${tariff_code}&select=id`);
+  if (tarife.length === 0) return json({ fehler: "unbekannter_tarif" }, 400);
+
+  // Verhindert Duplikate, falls der Kunde die Seite neu laedt.
+  const vorhanden = await db.select(
+    "subscriptions",
+    `paypal_subscription_id=eq.${paypal_subscription_id}&select=id`
+  );
+  if (vorhanden.length > 0) {
+    return json({ status: "bereits_angelegt" });
+  }
+
+  await db.insert("subscriptions", [
+    {
+      customer_id: customerId,
+      tariff_id: tarife[0].id,
+      status: "wird_geprueft",
+      paypal_subscription_id,
+    },
+  ]);
+
+  return json({ status: "angelegt" });
 }
 
 // ---------- Kuendigung durch Kunden ----------

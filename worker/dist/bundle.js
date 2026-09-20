@@ -1,8 +1,14 @@
 // Löschmeier Test — Cloudflare Worker (zusammengefasste Datei für den
 // Dashboard-Code-Editor). Quelle/Wartung in worker/src/*.js — diese Datei
-// wird daraus von Hand zusammengesetzt, bitte nicht direkt bearbeiten.
+// wird daraus automatisch zusammengesetzt (build_bundle.py), bitte nicht
+// direkt bearbeiten.
 
 // ===== supabase.js =====
+
+// Kleiner Helfer für Zugriffe auf die Supabase-REST-API (PostgREST) mit
+// dem Service-Role-Key. Läuft NUR im Worker, nie im Browser - der
+// Service-Role-Key umgeht Row Level Security bewusst, weil hier jede
+// Schreiboperation vorher serverseitig geprüft wurde.
 
 function supabaseClient(env) {
   const base = env.SUPABASE_URL + "/rest/v1";
@@ -26,13 +32,18 @@ function supabaseClient(env) {
   }
 
   return {
+    // Einzelnen Datensatz oder Liste lesen (?spalte=eq.wert&select=...)
     select: (table, query = "") => request(`/${table}?${query}`, { method: "GET" }),
+
+    // Neue Zeile(n) einfügen, gibt eingefügte Zeile(n) zurück
     insert: (table, rows) =>
       request(`/${table}`, {
         method: "POST",
         headers: { Prefer: "return=representation" },
         body: JSON.stringify(rows),
       }),
+
+    // Zeilen aktualisieren, die den Query-Filter erfüllen
     update: (table, query, patch) =>
       request(`/${table}?${query}`, {
         method: "PATCH",
@@ -42,7 +53,15 @@ function supabaseClient(env) {
   };
 }
 
+// Prüft ein Supabase-Auth-Zugriffstoken (JWT eines eingeloggten Kunden)
+// und liefert die auth_user_id zurück, oder null wenn ungültig/abgelaufen.
 async function pruefeNutzerToken(env, accessToken) {
+  const nutzer = await holeNutzer(env, accessToken);
+  return nutzer ? nutzer.id : null;
+}
+
+// Wie pruefeNutzerToken, liefert aber den ganzen Nutzer (inkl. E-Mail).
+async function holeNutzer(env, accessToken) {
   const res = await fetch(env.SUPABASE_URL + "/auth/v1/user", {
     headers: {
       apikey: env.SUPABASE_ANON_KEY,
@@ -50,11 +69,13 @@ async function pruefeNutzerToken(env, accessToken) {
     },
   });
   if (!res.ok) return null;
-  const daten = await res.json();
-  return daten.id || null;
+  return res.json();
 }
 
 // ===== paypal.js =====
+
+// PayPal-Hilfsfunktionen: OAuth-Token holen, Webhook-Signatur prüfen,
+// Abo-Details abfragen (für den täglichen Abgleich) und Abo kündigen.
 
 async function holeZugriffstoken(env) {
   const auth = btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_SECRET}`);
@@ -71,6 +92,9 @@ async function holeZugriffstoken(env) {
   return daten.access_token;
 }
 
+// Offizielle PayPal-Prüfung, ob ein eingegangener Webhook wirklich von
+// PayPal stammt (statt die Signatur selbst kryptografisch nachzurechnen -
+// das übernimmt PayPal auf Anfrage zuverlässiger).
 async function webhookIstEcht(env, headers, rohBody) {
   const token = await holeZugriffstoken(env);
   const payload = {
@@ -117,10 +141,12 @@ async function kuendigeAbo(env, paypalSubscriptionId, grund) {
       body: JSON.stringify({ reason: grund || "Kuendigung durch Kunden" }),
     }
   );
+  // 204 = erfolgreich gekuendigt
   return res.status === 204;
 }
 
 // ===== index.js =====
+
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -151,6 +177,9 @@ export default {
       if (url.pathname === "/api/kuendigen" && request.method === "POST") {
         return await kundeKuendigt(request, env);
       }
+      if (url.pathname === "/api/abo-anlegen" && request.method === "POST") {
+        return await aboAnlegen(request, env);
+      }
       return json({ fehler: "Unbekannter Pfad" }, 404);
     } catch (e) {
       console.error(e);
@@ -163,17 +192,21 @@ export default {
   },
 };
 
+// ---------- Webhook ----------
+
 async function verarbeiteWebhook(request, env) {
   const rohBody = await request.text();
 
   const echt = await webhookIstEcht(env, request.headers, rohBody);
   if (!echt) {
+    // Nicht verifizierte Nachrichten duerfen NIE Daten aendern.
     return json({ fehler: "Signatur ungueltig" }, 400);
   }
 
   const ereignis = JSON.parse(rohBody);
   const db = supabaseClient(env);
 
+  // Idempotenz: jedes PayPal-Ereignis nur einmal verarbeiten.
   const vorhanden = await db.select(
     "webhook_events",
     `paypal_event_id=eq.${ereignis.id}&select=id`
@@ -221,6 +254,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
     }
 
     case "PAYMENT.SALE.COMPLETED": {
+      // Wiederkehrende Zahlung erfolgreich. billing_agreement_id ist die PayPal-Subscription-ID.
       const subId = resource.billing_agreement_id;
       if (!subId) break;
       const abos = await db.select("subscriptions", `paypal_subscription_id=eq.${subId}&select=id,status`);
@@ -237,6 +271,8 @@ async function verarbeiteEreignis(db, env, ereignis) {
         },
       ]);
 
+      // Aktiviert das Abo (falls es aus Kulanzzeit/ueberfaellig kam) und
+      // aktualisiert den bezahlten Zeitraum anhand der aktuellen PayPal-Daten.
       const details = await holeAboDetails(env, subId);
       await db.update("subscriptions", `id=eq.${abo.id}`, {
         status: "aktiv",
@@ -275,6 +311,9 @@ async function verarbeiteEreignis(db, env, ereignis) {
     }
 
     case "BILLING.SUBSCRIPTION.CANCELLED": {
+      // Kuendigung direkt bei PayPal (nicht ueber unsere App). Zugang bleibt
+      // bis zum Ende des bezahlten Zeitraums bestehen (siehe pruefeZugriff),
+      // aber der Status zeigt "gekuendigt".
       const abos = await db.select(
         "subscriptions",
         `paypal_subscription_id=eq.${resource.id}&select=id,bezahlt_bis`
@@ -303,9 +342,13 @@ async function verarbeiteEreignis(db, env, ereignis) {
     }
 
     default:
+      // Andere Ereignistypen (CREATED, UPDATED, Dispute, ...) werden nur
+      // protokolliert (siehe webhook_events), aber aendern nichts.
       break;
   }
 }
+
+// ---------- Zugriffspruefung (von der App bei jeder geschuetzten Aktion aufgerufen) ----------
 
 const ERLAUBTE_STATUS = new Set(["aktiv", "kulanzzeit", "gekuendigt_zum_ende"]);
 const MAX_GERAETE = 2;
@@ -354,6 +397,7 @@ async function pruefeZugriff(request, env) {
     return json({ erlaubt: false, grund: "bezahlter_zeitraum_beendet" });
   }
 
+  // Geraet registrieren/aktualisieren, Geraetelimit pruefen.
   const geraete = await db.select(
     "devices",
     `customer_id=eq.${customerId}&select=id,geraet_name`
@@ -370,6 +414,67 @@ async function pruefeZugriff(request, env) {
 
   return json({ erlaubt: true, status: abo.status });
 }
+
+// ---------- Abo nach PayPal-Bestaetigung anlegen ----------
+// Wird aufgerufen, sobald der Kunde den PayPal-Button bestaetigt hat
+// (onApprove). Legt Kundenprofil (falls neu) und Abo mit Status
+// "wird_geprueft" an - erst der Webhook BILLING.SUBSCRIPTION.ACTIVATED
+// schaltet danach wirklich frei. Verhindert, dass allein die
+// Rueckleitung von PayPal Zugang gewaehrt.
+
+async function aboAnlegen(request, env) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "");
+  const nutzer = await holeNutzer(env, accessToken);
+  if (!nutzer) return json({ fehler: "nicht_angemeldet" }, 401);
+
+  const body = await request.json().catch(() => ({}));
+  const { paypal_subscription_id, tariff_code } = body;
+  if (!paypal_subscription_id || !tariff_code) {
+    return json({ fehler: "fehlende_angaben" }, 400);
+  }
+
+  const db = supabaseClient(env);
+
+  let profile = await db.select(
+    "customer_profiles",
+    `auth_user_id=eq.${nutzer.id}&select=id`
+  );
+  let customerId;
+  if (profile.length === 0) {
+    const neu = await db.insert("customer_profiles", [
+      { auth_user_id: nutzer.id, email: nutzer.email },
+    ]);
+    customerId = neu[0].id;
+  } else {
+    customerId = profile[0].id;
+  }
+
+  const tarife = await db.select("tariffs", `code=eq.${tariff_code}&select=id`);
+  if (tarife.length === 0) return json({ fehler: "unbekannter_tarif" }, 400);
+
+  // Verhindert Duplikate, falls der Kunde die Seite neu laedt.
+  const vorhanden = await db.select(
+    "subscriptions",
+    `paypal_subscription_id=eq.${paypal_subscription_id}&select=id`
+  );
+  if (vorhanden.length > 0) {
+    return json({ status: "bereits_angelegt" });
+  }
+
+  await db.insert("subscriptions", [
+    {
+      customer_id: customerId,
+      tariff_id: tarife[0].id,
+      status: "wird_geprueft",
+      paypal_subscription_id,
+    },
+  ]);
+
+  return json({ status: "angelegt" });
+}
+
+// ---------- Kuendigung durch Kunden ----------
 
 async function kundeKuendigt(request, env) {
   const authHeader = request.headers.get("Authorization") || "";
@@ -409,6 +514,8 @@ async function kundeKuendigt(request, env) {
   return json({ status: "gekuendigt", wirksam_zum: abo.bezahlt_bis });
 }
 
+// ---------- Taeglicher Abgleich (faengt ausgefallene Webhooks ab) ----------
+
 async function taeglicherAbgleich(env) {
   const db = supabaseClient(env);
   const abos = await db.select(
@@ -440,6 +547,7 @@ async function taeglicherAbgleich(env) {
     }
   }
 
+  // Kulanzzeit abgelaufen ohne neue Zahlung -> sperren.
   const jetzt = new Date().toISOString();
   const abgelaufeneKulanz = await db.select(
     "subscriptions",

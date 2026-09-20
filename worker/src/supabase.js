@@ -49,6 +49,12 @@ export function supabaseClient(env) {
 // Prüft ein Supabase-Auth-Zugriffstoken (JWT eines eingeloggten Kunden)
 // und liefert die auth_user_id zurück, oder null wenn ungültig/abgelaufen.
 export async function pruefeNutzerToken(env, accessToken) {
+  const nutzer = await holeNutzer(env, accessToken);
+  return nutzer ? nutzer.id : null;
+}
+
+// Wie pruefeNutzerToken, liefert aber den ganzen Nutzer (inkl. E-Mail).
+export async function holeNutzer(env, accessToken) {
   const res = await fetch(env.SUPABASE_URL + "/auth/v1/user", {
     headers: {
       apikey: env.SUPABASE_ANON_KEY,
@@ -56,6 +62,5 @@ export async function pruefeNutzerToken(env, accessToken) {
     },
   });
   if (!res.ok) return null;
-  const daten = await res.json();
-  return daten.id || null;
+  return res.json();
 }
