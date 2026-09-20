@@ -109,11 +109,18 @@
     }
   });
 
+  let paypalButtonGeladen = false;
+
   async function ladePaypalButton(){
-    const script = document.createElement("script");
-    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=EUR`;
-    document.body.appendChild(script);
-    await new Promise(resolve => { script.onload = resolve; });
+    if(paypalButtonGeladen) return;
+    paypalButtonGeladen = true;
+
+    if(!window.paypal){
+      const script = document.createElement("script");
+      script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=EUR`;
+      document.body.appendChild(script);
+      await new Promise(resolve => { script.onload = resolve; });
+    }
 
     paypal.Buttons({
       style: { shape: "pill", color: "blue", layout: "vertical", label: "subscribe" },
@@ -166,7 +173,19 @@
     return abos.length > 0;
   }
 
+  let loginPruefungLaeuft = false;
+
   async function pruefeLoginZustand(){
+    if(loginPruefungLaeuft) return;
+    loginPruefungLaeuft = true;
+    try {
+      await pruefeLoginZustandInnen();
+    } finally {
+      loginPruefungLaeuft = false;
+    }
+  }
+
+  async function pruefeLoginZustandInnen(){
     const { data: { session } } = await sb.auth.getSession();
     if(!session) return;
 
