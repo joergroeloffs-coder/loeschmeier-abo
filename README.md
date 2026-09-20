@@ -50,7 +50,9 @@ Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
 - [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
 - [x] Kundenbereich (`app/kundenbereich.html`): Abo-Status, Geräte, Kündigung
 - [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — getestet, funktioniert
-- [ ] E-Mail-Versand (Resend, Domain-Verifizierung läuft gerade)
+- [x] E-Mail-Versand: Resend eingerichtet, Domain verifiziert, als Custom SMTP
+      in Supabase hinterlegt — Anmelde-Links funktionieren jetzt ohne Limit
+      und kommen von `noreply@roewise.com`
 - [x] Rechtliche Seiten (Impressum, Datenschutz, AGB, Widerruf) — **Hinweis: vor echtem
       Verkaufsstart von Rechtsberatung prüfen lassen**, siehe `app/agb.html`
 - [x] **Sicherheitsfix**: App (`nutzer/`, `nutzer-admin/`) war bisher ohne jede
