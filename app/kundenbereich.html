@@ -62,6 +62,7 @@
 <header>
   <h1>Kundenbereich</h1>
   <p class="sub" id="eingeloggt-als">Wird geladen ...</p>
+  <button class="btn gefahr" id="abmelden-btn" style="max-width:200px;margin:14px auto 0;display:none">Abmelden</button>
 </header>
 
 <div class="karte" id="abo-karte" style="display:none">
@@ -126,6 +127,7 @@
       return;
     }
     document.getElementById("eingeloggt-als").textContent = session.user.email;
+    document.getElementById("abmelden-btn").style.display = "block";
 
     // customer_profiles und subscriptions sind per RLS auf den eigenen
     // Datensatz beschraenkt - direktes Lesen ueber den anon-Key ist hier
@@ -231,6 +233,11 @@
     } else {
       zeigeStatus(statusEl, "Fehler bei der Kündigung: " + (daten.fehler || "unbekannt"), "fehler");
     }
+  });
+
+  document.getElementById("abmelden-btn").addEventListener("click", async () => {
+    await sb.auth.signOut();
+    window.location.href = "/registrieren.html";
   });
 
   laden();

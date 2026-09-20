@@ -68,6 +68,7 @@
   <p class="sub" id="eingeloggt-als"></p>
   <div id="paypal-button-container" style="margin-top:16px"></div>
   <div class="status" id="abo-status"></div>
+  <button class="btn" id="abmelden-btn" style="background:transparent;border:1px solid var(--border);color:var(--muted)">Abmelden</button>
 </div>
 
 <footer>© Löschmeier Test · <a href="/kundenbereich.html" style="color:inherit">Kundenbereich</a> ·
@@ -184,6 +185,11 @@
     document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + " — jetzt Abo abschließen:";
     ladePaypalButton();
   }
+
+  document.getElementById("abmelden-btn").addEventListener("click", async () => {
+    await sb.auth.signOut();
+    window.location.reload();
+  });
 
   sb.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
   pruefeLoginZustand();
