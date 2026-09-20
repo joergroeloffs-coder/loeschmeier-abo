@@ -600,6 +600,25 @@ async function taeglicherAbgleich(env) {
 // ---------- Admin-Bereich ----------
 // Schutz per einfachem Passwort (env.ADMIN_PASSWORT), da nur eine Person
 // (der Betreiber) Zugriff braucht - kein eigenes Nutzerkonto-System noetig.
+// Zusaetzlich Rate Limiting ueber KV (env.RATE_KV), damit das Passwort
+// nicht per Brute-Force durchprobiert werden kann.
+
+const RATE_LIMIT_FENSTER_SEK = 60;
+const RATE_LIMIT_MAX_VERSUCHE = 30; // grosszuegig fuer normale Nutzung, bremst aber Brute-Force deutlich
+
+async function rateLimitUeberschritten(request, env) {
+  if (!env.RATE_KV) return false; // KV noch nicht verknuepft - dann kein Limit
+  const ip = request.headers.get("CF-Connecting-IP") || "unbekannt";
+  const key = "admin_versuche:" + ip;
+
+  const aktuellRoh = await env.RATE_KV.get(key);
+  const aktuell = aktuellRoh ? parseInt(aktuellRoh, 10) : 0;
+
+  if (aktuell >= RATE_LIMIT_MAX_VERSUCHE) return true;
+
+  await env.RATE_KV.put(key, String(aktuell + 1), { expirationTtl: RATE_LIMIT_FENSTER_SEK });
+  return false;
+}
 
 function adminAutorisiert(request, env) {
   const passwort = request.headers.get("X-Admin-Passwort") || "";
@@ -607,6 +626,9 @@ function adminAutorisiert(request, env) {
 }
 
 async function adminAnfrage(request, env, url) {
+  if (await rateLimitUeberschritten(request, env)) {
+    return json({ fehler: "zu_viele_versuche_bitte_warten" }, 429);
+  }
   if (!adminAutorisiert(request, env)) {
     return json({ fehler: "nicht_autorisiert" }, 401);
   }

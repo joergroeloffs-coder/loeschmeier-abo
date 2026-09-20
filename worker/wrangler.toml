@@ -19,3 +19,10 @@ KULANZ_TAGE = "3"
 # Taeglicher Abgleich mit PayPal (faengt ausgefallene Webhooks ab)
 [triggers]
 crons = ["0 3 * * *"]
+
+# KV-Namespace fuer Rate Limiting des Admin-Logins. Im Dashboard erstellt
+# und verknuepft (Settings -> Bindings -> KV Namespace, Variablenname
+# "RATE_KV") statt hier eingetragen, da ohne wrangler-CLI keine ID bekannt.
+# [[kv_namespaces]]
+# binding = "RATE_KV"
+# id = "<im Dashboard sichtbare Namespace-ID>"
