@@ -77,6 +77,29 @@ folgenden Punkte wurden korrigiert.
 - Sichtbare Fokusmarkierung, `fieldset`/`legend` für Auswahlgruppen,
   `aria-live` für Statusmeldungen.
 
+
+### 2.1 Nachtrag: zweite App-Kopie mit schwachem Schutz
+
+Bei der Endkontrolle fiel auf, dass dieses Repository unter `app/nutzer/` und
+`app/nutzer-admin/` eine **zweite Kopie der Anwendung** enthält, die unter
+`test.roewise.com` ausgeliefert wird. Sie benutzte weiterhin die alte
+`app/zugriffspruefung.js` mit einer Offline-Gnadenfrist aus dem
+Browserspeicher. Diese Fassung gab die App frei, sobald der Eintrag
+`loeschmeier_abo_zugriff_bis` in der Zukunft lag – ein Wert, den jede Person
+im Browser selbst setzen kann. Damit war das Produkt über die Testadresse
+ohne Vertrag vollständig nutzbar, obwohl die Hauptanwendung inzwischen
+serverseitig geschützt war.
+
+`app/zugriffspruefung.js` enthält jetzt denselben serverseitigen Schutz wie
+`wasserentnahme-foehr/zugangsschutz.js`. Die Gnadenfrist ist ersatzlos
+entfallen, und die Einbindung wurde hinter `config.js` verschoben, weil der
+Schutz die Konfiguration braucht.
+
+Geprüft im Browser (`test/browser/testkopie-zugriff.test.js`): Ein gesetzter
+`loeschmeier_abo_zugriff_bis`-Eintrag zusammen mit `?freigabe=1` öffnet die
+Testkopie nicht mehr; ohne Anmeldung bleibt sie gesperrt; mit gültigem Abo
+lädt sie normal.
+
 ## 3. Zwei Befunde, die eine Entscheidung des Betriebs brauchen
 
 ### 3.1 Die Repositories sind öffentlich
@@ -121,6 +144,10 @@ erreichbar. Einen Umgehungsweg gibt es bewusst nicht.
 ### loeschmeier-abo (Branch `claude/integration-loeschbaert`)
 
 ```
+app/zugriffspruefung.js            serverseitiger Schutz statt Gnadenfrist im Browser
+app/config.js                      Zugangsdaten fuer die Pruefung
+app/nutzer/index.html              Ladereihenfolge der Skripte
+app/nutzer-admin/index.html        dito
 app/agb.html                       Darstellung auf schmalen Bildschirmen
 app/datenschutz.html               dito
 app/impressum.html                 dito
@@ -276,6 +303,7 @@ gilt, „Angaben ändern" führt zurück.
 | aktives Abo | frei; 200 Listeneinträge, 784 Marker, PMTiles-Grundkarte gezeichnet |
 | `?freigabe=1`, `?zugang=…`, `?test=1` | wirkungslos |
 | manipuliertes `localStorage` (alte Testphasen-Schlüssel) | wirkungslos |
+| Testkopie unter `test.roewise.com/nutzer/` mit gesetzter Gnadenfrist | wirkungslos (siehe 2.1) |
 | Kunde ruft `nutzer-admin/` oder die Datenpflege auf | gesperrt |
 | Betreiberkonto ruft die Datenpflege auf | frei |
 
