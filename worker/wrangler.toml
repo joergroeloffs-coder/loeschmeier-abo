@@ -24,7 +24,12 @@ BETREIBER_EMAIL = "wasserentnahme-foehr@web.de"
 # Kommagetrennte Anmelde-E-Mail-Adressen. MUSS gesetzt sein, bevor die
 # geschuetzten Seiten veroeffentlicht werden - sonst sperrt sich der Betrieb
 # aus den eigenen Werkzeugen aus.
-BETREIBER_AUTH_EMAILS = ""
+#
+# ABSICHTLICH NICHT HIER EINGETRAGEN: Der Wert steht im Cloudflare-Dashboard.
+# Eine E-Mail-Adresse waere in diesem oeffentlichen Repository fuer jeden
+# lesbar. Ausserdem wuerde ein leerer Wert an dieser Stelle bei einem Deploy
+# per wrangler den Dashboard-Wert ueberschreiben und den Betrieb aussperren.
+# BETREIBER_AUTH_EMAILS = "adresse@example.de"
 
 # Zusaetzlich erlaubte Aufrufer (CORS), kommagetrennt. Die eigenen Domains
 # stehen bereits fest im Worker-Code.
