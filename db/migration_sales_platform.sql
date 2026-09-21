@@ -110,6 +110,9 @@ alter table legal_declarations enable row level security;
 alter table legal_acceptances enable row level security;
 alter table outbound_messages enable row level security;
 
+-- "create policy" kennt kein "if not exists". Ohne das vorherige Loeschen
+-- bricht ein zweiter Lauf der Migration hier mit Fehler 42710 ab.
+drop policy if exists "eigene_rechtserklaerungen" on legal_declarations;
 create policy "eigene_rechtserklaerungen" on legal_declarations
   for select using (
     subscription_id in (
