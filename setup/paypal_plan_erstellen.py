@@ -94,7 +94,7 @@ def main():
         body={
             "product_id": produkt_id,
             "name": "Löschbärt Föhr – Jahreszugang",
-            "description": "12 EUR pro Jahr; nach der Mindestlaufzeit monatlich kuendbar",
+            "description": "12 EUR pro Jahr; nach zwoelf Monaten Mindestlaufzeit jederzeit kuendbar",
             "billing_cycles": [
                 {
                     "frequency": {"interval_unit": "YEAR", "interval_count": 1},
