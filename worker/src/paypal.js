@@ -68,3 +68,19 @@ export async function kuendigeAbo(env, paypalSubscriptionId, grund) {
   // 204 = erfolgreich gekuendigt
   return res.status === 204;
 }
+
+export async function erstatteZahlung(env, paypalSaleId, betrag = null) {
+  const token = await holeZugriffstoken(env);
+  const res = await fetch(`${env.PAYPAL_API_BASE}/v1/payments/sale/${paypalSaleId}/refund`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(betrag ? {
+      amount: { total: betrag.value, currency: betrag.currency },
+    } : {}),
+  });
+  if (!res.ok) throw new Error(`PayPal-Erstattung fehlgeschlagen: ${res.status}`);
+  return res.json();
+}

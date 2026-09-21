@@ -46,6 +46,13 @@ export function supabaseClient(env) {
 
     // Zeilen loeschen, die den Query-Filter erfuellen
     delete: (table, query) => request(`/${table}?${query}`, { method: "DELETE" }),
+
+    // Datenbankfunktionen fuer atomare Operationen (z.B. Rechnungsnummern).
+    rpc: (functionName, args = {}) =>
+      request(`/rpc/${functionName}`, {
+        method: "POST",
+        body: JSON.stringify(args),
+      }),
   };
 }
 

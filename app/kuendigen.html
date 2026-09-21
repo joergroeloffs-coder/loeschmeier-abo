@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Widerrufsbelehrung – Löschmeier Föhr</title>
+    <title>Verträge hier kündigen – Löschmeier Föhr</title>
     <style>
       :root {
         --bg: #0d1116;
@@ -23,36 +23,30 @@
         background: var(--bg);
         color: var(--text);
         font:
-          16px/1.6 system-ui,
+          16px/1.55 system-ui,
           sans-serif;
       }
       main {
-        width: min(720px, calc(100% - 32px));
+        width: min(680px, calc(100% - 32px));
         margin: auto;
         padding: 40px 0;
       }
       a {
         color: var(--accent);
       }
-      h2 {
-        margin-top: 32px;
-      }
-      .muted {
-        color: var(--muted);
-      }
-      form,
-      .box {
-        padding: 22px;
+      form {
+        padding: 24px;
         background: var(--card);
         border: 1px solid var(--border);
-        border-radius: 13px;
-        margin-top: 20px;
+        border-radius: 14px;
       }
       label {
         display: block;
-        margin-top: 13px;
+        margin-top: 14px;
       }
-      input {
+      input,
+      select,
+      textarea {
         width: 100%;
         padding: 11px;
         margin-top: 5px;
@@ -73,6 +67,9 @@
         font-weight: 750;
         font-size: 16px;
       }
+      .hint {
+        color: var(--muted);
+      }
       #result {
         display: none;
         white-space: pre-wrap;
@@ -89,40 +86,13 @@
   <body>
     <main>
       <p><a href="/registrieren.html">← Zurück</a></p>
-      <h1>Widerrufsbelehrung</h1>
-      <h2>Widerrufsrecht</h2>
-      <p>
-        Sie haben das Recht, binnen vierzehn Tagen ohne Angabe von Gründen
-        diesen Vertrag zu widerrufen. Die Widerrufsfrist beträgt vierzehn Tage
-        ab dem Tag des Vertragsabschlusses.
-      </p>
-      <p>
-        Um Ihr Widerrufsrecht auszuüben, müssen Sie uns – Jörg Roeloffs,
-        Scholkwai 86, 25938 Süderende, E-Mail: wasserentnahme-foehr@web.de –
-        mittels einer eindeutigen Erklärung über Ihren Entschluss informieren.
-        Sie können dafür das elektronische Formular unten, eine E-Mail oder das
-        Muster-Widerrufsformular verwenden. Zur Wahrung der Frist reicht die
-        rechtzeitige Absendung.
-      </p>
-      <h2>Folgen des Widerrufs</h2>
-      <p>
-        Wenn Sie diesen Vertrag widerrufen, erstatten wir alle von Ihnen
-        erhaltenen Zahlungen unverzüglich und spätestens binnen vierzehn Tagen
-        ab Eingang des Widerrufs. Für die Rückzahlung wird dasselbe
-        Zahlungsmittel verwendet, sofern nichts anderes vereinbart wurde;
-        Entgelte werden nicht berechnet.
-      </p>
-      <p>
-        Haben Sie ausdrücklich verlangt, dass die Dienstleistung während der
-        Widerrufsfrist beginnt, ist ein angemessener Betrag für die bis zum
-        Widerruf bereits erbrachte Leistung zu zahlen.
+      <h1>Verträge hier kündigen</h1>
+      <p class="hint">
+        Ohne Anmeldung kündigen. Pflichtangaben dienen nur der eindeutigen
+        Zuordnung. Direkt nach dem Absenden erhalten Sie eine Vorgangsnummer und
+        einen speicherbaren Nachweis.
       </p>
       <form id="form">
-        <h2>Vertrag widerrufen</h2>
-        <p class="muted">
-          Sie erhalten sofort eine Vorgangsnummer, einen speicherbaren Nachweis
-          und eine E-Mail-Bestätigung.
-        </p>
         <label
           >Name<input
             name="name"
@@ -146,21 +116,26 @@
             name="vertragsbezeichnung"
             value="Löschmeier Föhr – Jahreszugang"
             required /></label
-        ><button type="submit">Widerruf bestätigen</button>
+        ><label
+          >Art der Kündigung<select name="erklaerungsart">
+            <option value="ordentlich">
+              Ordentlich zum nächstmöglichen Zeitpunkt
+            </option>
+            <option value="ausserordentlich">Außerordentlich</option>
+          </select></label
+        ><label
+          >Gewünschtes Vertragsende (optional)<input
+            name="gewuenschtes_ende"
+            type="date" /></label
+        ><label
+          >Grund (bei außerordentlicher Kündigung empfohlen)<textarea
+            name="grund"
+            rows="4"
+            maxlength="1000"
+          ></textarea></label
+        ><button type="submit">Jetzt kündigen</button>
       </form>
       <div id="result" role="status"></div>
-      <section class="box">
-        <h2>Muster-Widerrufsformular</h2>
-        <p>
-          An Jörg Roeloffs, Scholkwai 86, 25938 Süderende,
-          wasserentnahme-foehr@web.de
-        </p>
-        <p>
-          Hiermit widerrufe(n) ich/wir den von mir/uns abgeschlossenen Vertrag
-          über das Abonnement „Löschmeier Föhr“. Bestellt am: ____. Name und
-          Anschrift: ____. Datum: ____.
-        </p>
-      </section>
     </main>
     <script>
       const WORKER_URL =
@@ -172,13 +147,16 @@
         const values = Object.fromEntries(new FormData(form));
         result.style.display = "block";
         result.className = "";
-        result.textContent = "Widerruf wird übermittelt …";
+        result.textContent = "Kündigung wird übermittelt …";
         try {
-          const response = await fetch(WORKER_URL + "/api/widerrufen", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(values),
-            }),
+          const response = await fetch(
+              WORKER_URL + "/api/kuendigung-erklaeren",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(values),
+              },
+            ),
             data = await response.json();
           if (!response.ok)
             throw new Error(data.fehler || "Übermittlung fehlgeschlagen");
@@ -188,14 +166,14 @@
             }),
             link = document.createElement("a");
           link.href = URL.createObjectURL(blob);
-          link.download = `widerrufsbestaetigung-${data.vorgangsnummer}.txt`;
+          link.download = `kuendigungsbestaetigung-${data.vorgangsnummer}.txt`;
           link.textContent = " Bestätigung herunterladen";
           result.append(document.createElement("br"), link);
           form.querySelector("button").disabled = true;
         } catch (error) {
           result.className = "error";
           result.textContent =
-            "Der Widerruf konnte nicht übermittelt werden: " +
+            "Die Kündigung konnte nicht übermittelt werden: " +
             error.message +
             ". Bitte alternativ per E-Mail an wasserentnahme-foehr@web.de senden.";
         }

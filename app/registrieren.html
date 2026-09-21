@@ -1,220 +1,458 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Löschmeier Test — Registrieren</title>
-<style>
-  :root{
-    --bg:#0d1116; --card:#161b22; --border:#2a313c;
-    --text:#e6edf3; --muted:#93a3b3; --signal:#2fa4ff; --preis:#4fd18b; --fehler:#e0554a;
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
-    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
-    display:flex; flex-direction:column; align-items:center;
-    padding:48px 20px;
-  }
-  header{text-align:center; margin-bottom:8px; max-width:440px}
-  h1{font-size:26px; margin:0 0 8px; letter-spacing:-0.5px}
-  p.sub{color:var(--muted); margin:0; font-size:15px; line-height:1.5}
-
-  .karte{
-    background:var(--card); border:1px solid var(--border); border-radius:16px;
-    padding:28px 24px; width:100%; max-width:440px; margin-top:28px;
-  }
-  .preis{font-size:32px; font-weight:700; color:var(--preis); margin:0 0 4px}
-  .preis span{font-size:14px; color:var(--muted); font-weight:400}
-
-  input{
-    width:100%; background:var(--bg); color:var(--text);
-    border:1px solid var(--border); border-radius:8px; padding:12px 14px;
-    font-size:15px; margin-top:6px;
-  }
-  label{font-size:13px; color:var(--muted)}
-  button.btn{
-    display:block; width:100%; margin-top:14px;
-    background:var(--signal); color:#0d1116; text-align:center; border:0;
-    padding:14px; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer;
-  }
-  button.btn:disabled{opacity:0.5; cursor:default}
-
-  .status{margin-top:16px; font-size:14px; padding:12px 14px; border-radius:8px; display:none}
-  .status.on{display:block}
-  .status.info{background:#1a2733; color:var(--text)}
-  .status.fehler{background:#3a1c1c; color:var(--fehler)}
-  .status.erfolg{background:#173a29; color:var(--preis)}
-
-  footer{margin-top:40px; font-size:12px; color:var(--muted)}
-</style>
-</head>
-<body>
-
-<header>
-  <h1>Löschmeier Test</h1>
-  <p class="sub">Digitale Wasserentnahmestellen-Karte — Testversion mit echtem Abo.</p>
-</header>
-
-<div class="karte" id="login-karte">
-  <p class="preis">1&nbsp;€ <span>/ Monat, jederzeit kündbar</span></p>
-  <label for="email">E-Mail-Adresse</label>
-  <input type="email" id="email" placeholder="du@beispiel.de" autocomplete="email">
-  <button class="btn" id="link-senden">Anmelde-Link senden</button>
-  <div class="status" id="login-status"></div>
-</div>
-
-<div class="karte" id="abo-karte" style="display:none">
-  <p class="sub" id="eingeloggt-als"></p>
-  <div id="paypal-button-container" style="margin-top:16px"></div>
-  <div class="status" id="abo-status"></div>
-  <button class="btn" id="abmelden-btn" style="background:transparent;border:1px solid var(--border);color:var(--muted)">Abmelden</button>
-</div>
-
-<footer>© Löschmeier Test · <a href="/kundenbereich.html" style="color:inherit">Kundenbereich</a> ·
-  <a href="/impressum.html" style="color:inherit">Impressum</a> ·
-  <a href="/datenschutz.html" style="color:inherit">Datenschutz</a> ·
-  <a href="/agb.html" style="color:inherit">AGB</a> ·
-  <a href="/widerruf.html" style="color:inherit">Widerruf</a></footer>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-  // Nicht geheime, oeffentliche Konfigurationswerte.
-  const SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g";
-  const WORKER_URL = "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
-  const PAYPAL_CLIENT_ID = "AVbDi3EuNbQry_liS-9_07-8tD73Zh11vmJwOoCL_7JTmNMqwCY0tHtSxFqqEzmGK9g82OKqfhaOHUR7";
-  const PLAN_ID = "P-15V30827XW664200TNKX3OCY";
-
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  function zeigeStatus(el, text, art){
-    el.textContent = text;
-    el.className = "status on " + art;
-  }
-
-  document.getElementById("link-senden").addEventListener("click", async () => {
-    const email = document.getElementById("email").value.trim();
-    const statusEl = document.getElementById("login-status");
-    if(!email){ zeigeStatus(statusEl, "Bitte E-Mail-Adresse eingeben.", "fehler"); return; }
-
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.href }
-    });
-    if(error){
-      zeigeStatus(statusEl, "Fehler: " + error.message, "fehler");
-    } else {
-      zeigeStatus(statusEl, "Link verschickt — bitte E-Mail-Postfach öffnen und Link anklicken.", "erfolg");
-    }
-  });
-
-  let paypalButtonGeladen = false;
-
-  async function ladePaypalButton(){
-    if(paypalButtonGeladen) return;
-    paypalButtonGeladen = true;
-
-    if(!window.paypal){
-      const script = document.createElement("script");
-      script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=EUR`;
-      document.body.appendChild(script);
-      await new Promise(resolve => { script.onload = resolve; });
-    }
-
-    paypal.Buttons({
-      style: { shape: "pill", color: "blue", layout: "vertical", label: "subscribe" },
-      createSubscription: function(data, actions){
-        return actions.subscription.create({ plan_id: PLAN_ID });
-      },
-      onApprove: async function(data){
-        const statusEl = document.getElementById("abo-status");
-        zeigeStatus(statusEl, "Zahlung bestätigt — Abo wird eingerichtet ...", "info");
-
-        const { data: sitzung } = await sb.auth.getSession();
-        const res = await fetch(WORKER_URL + "/api/abo-anlegen", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer " + sitzung.session.access_token,
-          },
-          body: JSON.stringify({ paypal_subscription_id: data.subscriptionID, tariff_code: "monat" }),
-        });
-        if(res.ok){
-          zeigeStatus(statusEl, "Fertig! Die Freischaltung erfolgt automatisch, sobald PayPal die erste Zahlung bestätigt (meist innerhalb weniger Sekunden). Danach: Kundenbereich öffnen.", "erfolg");
-        } else {
-          zeigeStatus(statusEl, "Zahlung war erfolgreich, aber Abo konnte nicht angelegt werden. Bitte Support kontaktieren.", "fehler");
-        }
-      },
-      onError: function(err){
-        document.getElementById("abo-status").textContent = "";
-        zeigeStatus(document.getElementById("abo-status"), "PayPal-Fehler: " + err, "fehler");
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Löschmeier Föhr – Jahreszugang</title>
+    <style>
+      :root {
+        --bg: #0d1116;
+        --card: #161b22;
+        --border: #303844;
+        --text: #edf3f8;
+        --muted: #a8b4c0;
+        --accent: #43b3ff;
+        --ok: #52d18b;
+        --bad: #ff7b72;
       }
-    }).render("#paypal-button-container");
-  }
-
-  async function hatBereitsAbo(session){
-    const headers = {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: "Bearer " + session.access_token,
-    };
-    const profilRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/customer_profiles?select=id&auth_user_id=eq.${session.user.id}`,
-      { headers }
-    );
-    const profile = await profilRes.json();
-    if(!profile.length) return false;
-
-    const aboRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/subscriptions?select=status&customer_id=eq.${profile[0].id}&status=in.(aktiv,wird_geprueft,kulanzzeit,gekuendigt_zum_ende)&limit=1`,
-      { headers }
-    );
-    const abos = await aboRes.json();
-    return abos.length > 0;
-  }
-
-  let loginPruefungLaeuft = false;
-
-  async function pruefeLoginZustand(){
-    if(loginPruefungLaeuft) return;
-    loginPruefungLaeuft = true;
-    try {
-      await pruefeLoginZustandInnen();
-    } finally {
-      loginPruefungLaeuft = false;
-    }
-  }
-
-  async function pruefeLoginZustandInnen(){
-    const { data: { session } } = await sb.auth.getSession();
-    if(!session) return;
-
-    document.getElementById("login-karte").style.display = "none";
-    document.getElementById("abo-karte").style.display = "block";
-
-    if(await hatBereitsAbo(session)){
-      document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + ".";
-      document.getElementById("paypal-button-container").innerHTML =
-        '<p class="status on erfolg">Du hast bereits ein Abo — kein weiterer Kauf nötig.</p>' +
-        '<a href="/nutzer/" class="btn" style="display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none;font-size:20px;padding:20px;background:#e23c22;color:#fff">' +
-          '<img src="/icon-192.png" alt="" width="32" height="32" style="border-radius:6px">Löschmeier' +
-        '</a>' +
-        '<a href="/kundenbereich.html" class="btn" style="display:block;text-decoration:none;text-align:center;background:transparent;border:1px solid var(--border);color:var(--muted);font-weight:400;margin-top:10px">Kundenbereich</a>';
-      return;
-    }
-
-    document.getElementById("eingeloggt-als").textContent = "Eingeloggt als " + session.user.email + " — jetzt Abo abschließen:";
-    ladePaypalButton();
-  }
-
-  document.getElementById("abmelden-btn").addEventListener("click", async () => {
-    await sb.auth.signOut();
-    window.location.reload();
-  });
-
-  sb.auth.onAuthStateChange((event, session) => { if(session) pruefeLoginZustand(); });
-  pruefeLoginZustand();
-</script>
-
-</body>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          16px/1.55 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      main,
+      footer {
+        width: min(680px, calc(100% - 32px));
+        margin: auto;
+      }
+      main {
+        padding: 42px 0 20px;
+      }
+      h1 {
+        font-size: clamp(27px, 6vw, 42px);
+        line-height: 1.1;
+        margin: 0 0 10px;
+      }
+      .lead {
+        color: var(--muted);
+        font-size: 18px;
+      }
+      .card {
+        margin: 24px 0;
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--card);
+      }
+      .price {
+        font-size: 34px;
+        font-weight: 750;
+        color: var(--ok);
+      }
+      .price small {
+        font-size: 15px;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      ul {
+        padding-left: 22px;
+      }
+      label {
+        display: block;
+        margin: 12px 0 5px;
+      }
+      input[type="email"] {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+      }
+      .choice {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .choice input {
+        margin-top: 5px;
+      }
+      .btn {
+        width: 100%;
+        padding: 13px 16px;
+        margin-top: 14px;
+        border: 0;
+        border-radius: 9px;
+        background: var(--accent);
+        color: #071018;
+        font-weight: 750;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .status {
+        display: none;
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #202a35;
+      }
+      .status.show {
+        display: block;
+      }
+      .error {
+        color: var(--bad);
+      }
+      .success {
+        color: var(--ok);
+      }
+      a {
+        color: var(--accent);
+      }
+      footer {
+        padding: 28px 0 46px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      footer a {
+        color: inherit;
+      }
+      .notice {
+        border-left: 3px solid #d29922;
+        padding-left: 12px;
+        color: var(--muted);
+      }
+      .legal-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 20px 0;
+      }
+      .legal-actions a {
+        padding: 9px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Löschmeier Föhr</h1>
+      <p class="lead">
+        Digitale Karte der Wasserentnahmestellen und Defibrillatoren auf Föhr.
+      </p>
+      <nav class="legal-actions" aria-label="Vertrag verwalten">
+        <a href="/kuendigen.html">Verträge hier kündigen</a>
+        <a href="/widerruf.html">Vertrag widerrufen</a>
+      </nav>
+      <section class="card" aria-labelledby="offer-title">
+        <h2 id="offer-title">Jahreszugang für Privatpersonen</h2>
+        <p class="price" id="price">12,00 € <small>pro Jahr</small></p>
+        <ul>
+          <li>Nutzung auf bis zu 2 Geräten</li>
+          <li>jährliche Vorauszahlung über PayPal</li>
+          <li>12 Monate Mindestlaufzeit</li>
+          <li>danach unbefristet und jederzeit kündbar</li>
+          <li>ungenutzte vorausbezahlte Restzeit wird anteilig erstattet</li>
+          <li>
+            Gesamtpreis 12,00 €; gemäß § 19 UStG wird keine Umsatzsteuer
+            ausgewiesen
+          </li>
+        </ul>
+        <p class="notice" id="sales-notice">Verkaufsstatus wird geprüft …</p>
+      </section>
+      <section class="card" id="login-card">
+        <h2>1. Kundenkonto</h2>
+        <label for="email">E-Mail-Adresse</label
+        ><input id="email" type="email" autocomplete="email" required /><button
+          class="btn"
+          id="login"
+          type="button"
+        >
+          Anmelde-Link senden
+        </button>
+        <div class="status" id="login-status" role="status"></div>
+      </section>
+      <section class="card" id="order-card" hidden>
+        <h2>2. Bestellung prüfen</h2>
+        <p id="signed-in"></p>
+        <p>
+          <strong>Löschmeier Föhr – Jahreszugang</strong><br />Preis: 12,00 € je
+          12 Monate · Mindestlaufzeit: 12 Monate ab Leistungsbeginn · danach
+          unbefristete Verlängerung mit jährlicher Vorauszahlung und
+          jederzeitiger Kündigung · bis zu 2 Geräte
+        </p>
+        <label class="choice"
+          ><input id="terms" type="checkbox" /><span
+            >Ich akzeptiere die <a href="/agb.html" target="_blank">AGB</a> und
+            habe die
+            <a href="/widerruf.html" target="_blank">Widerrufsbelehrung</a>
+            sowie die
+            <a href="/datenschutz.html" target="_blank">Datenschutzerklärung</a>
+            gelesen.</span
+          ></label
+        ><label class="choice"
+          ><input type="radio" name="start" value="later" checked /><span
+            >Leistungsbeginn nach Ablauf der 14-tägigen Widerrufsfrist.</span
+          ></label
+        ><label class="choice"
+          ><input type="radio" name="start" value="now" /><span
+            >Ich verlange ausdrücklich, dass die Dienstleistung vor Ablauf der
+            Widerrufsfrist beginnt. Mir ist bekannt, dass bei Widerruf
+            Wertersatz für die bis dahin erbrachte Leistung verlangt werden
+            kann.</span
+          ></label
+        >
+        <p class="muted">
+          Mit dem PayPal-Button „Bezahlen“ geben Sie eine zahlungspflichtige
+          Bestellung über zunächst 12,00 € ab. Danach werden bis zur Kündigung
+          jeweils 12,00 € pro Jahr im Voraus berechnet.
+        </p>
+        <div id="paypal-button-container" style="margin-top: 18px"></div>
+        <div class="status" id="order-status" role="status"></div>
+        <p id="after-order" hidden>
+          <a href="https://foehr.roewise.com/nutzer/">Löschmeier Föhr öffnen</a>
+          · <a href="/kundenbereich.html">Kundenbereich öffnen</a>
+        </p>
+        <button class="btn secondary" id="logout" type="button">
+          Abmelden
+        </button>
+      </section>
+    </main>
+    <footer>
+      © Jörg Roeloffs · <a href="/kundenbereich.html">Kundenbereich</a> ·
+      <a href="/kuendigen.html">Verträge hier kündigen</a> ·
+      <a href="/widerruf.html">Vertrag widerrufen</a> ·
+      <a href="/impressum.html">Impressum</a> ·
+      <a href="/datenschutz.html">Datenschutz</a> · <a href="/agb.html">AGB</a>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      const SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co",
+        SUPABASE_ANON_KEY =
+          "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g",
+        WORKER_URL =
+          "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      let catalog = null,
+        tariff = null,
+        paypalRendered = false,
+        currentSession = null;
+      function status(id, text, kind = "") {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = `status show ${kind}`;
+      }
+      async function loadCatalog() {
+        try {
+          const response = await fetch(WORKER_URL + "/api/katalog");
+          if (!response.ok) throw new Error();
+          catalog = await response.json();
+          tariff = catalog.tarife.find((t) => t.code === "foehr-jahr");
+          if (tariff)
+            document.getElementById("price").innerHTML =
+              `${(tariff.preis_cent / 100).toFixed(2).replace(".", ",")} € <small>pro Jahr</small>`;
+          document.getElementById("sales-notice").textContent =
+            catalog.verkaufAktiv && tariff?.kaufbar
+              ? "Der Kauf ist freigeschaltet. Vor dem Bezahlen werden alle Vertragsangaben nochmals angezeigt."
+              : "Der Verkauf ist noch nicht freigeschaltet. Es kann derzeit keine Zahlung ausgelöst werden.";
+        } catch {
+          document.getElementById("sales-notice").textContent =
+            "Der Verkauf ist derzeit nicht verfügbar.";
+        }
+      }
+      document.getElementById("login").onclick = async () => {
+        const email = document.getElementById("email").value.trim();
+        if (!email)
+          return status(
+            "login-status",
+            "Bitte eine gültige E-Mail-Adresse eingeben.",
+            "error",
+          );
+        const { error } = await sb.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: location.origin + location.pathname },
+        });
+        status(
+          "login-status",
+          error
+            ? "Anmeldung fehlgeschlagen: " + error.message
+            : "Anmelde-Link wurde versandt. Bitte E-Mail-Postfach öffnen.",
+          error ? "error" : "success",
+        );
+      };
+      async function renderPaypal() {
+        if (
+          paypalRendered ||
+          !catalog?.verkaufAktiv ||
+          !tariff?.kaufbar ||
+          !currentSession
+        )
+          return;
+        paypalRendered = true;
+        const script = document.createElement("script");
+        script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(catalog.paypalClientId)}&vault=true&intent=subscription&currency=EUR`;
+        document.body.appendChild(script);
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = reject;
+        });
+        paypal
+          .Buttons({
+            style: {
+              shape: "rect",
+              color: "blue",
+              layout: "vertical",
+              label: "pay",
+            },
+            onClick(data, actions) {
+              if (!document.getElementById("terms").checked) {
+                status(
+                  "order-status",
+                  "Bitte zuerst den Rechtstexten zustimmen.",
+                  "error",
+                );
+                return actions.reject();
+              }
+              return actions.resolve();
+            },
+            createSubscription(data, actions) {
+              const subscription = {
+                plan_id: tariff.paypalPlanId,
+                custom_id: currentSession.user.id,
+              };
+              if (
+                document.querySelector('input[name="start"]:checked').value ===
+                "later"
+              ) {
+                subscription.start_time = new Date(
+                  Date.now() + 14 * 86400000,
+                ).toISOString();
+              }
+              return actions.subscription.create(subscription);
+            },
+            async onApprove(data) {
+              status(
+                "order-status",
+                "Zahlung bestätigt; die Vertragsdaten werden geprüft …",
+              );
+              const {
+                  data: { session },
+                } = await sb.auth.getSession(),
+                immediate =
+                  document.querySelector('input[name="start"]:checked')
+                    .value === "now";
+              const response = await fetch(WORKER_URL + "/api/abo-anlegen", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: "Bearer " + session.access_token,
+                },
+                body: JSON.stringify({
+                  paypal_subscription_id: data.subscriptionID,
+                  tariff_code: tariff.code,
+                  agb_akzeptiert: true,
+                  sofortiger_beginn: immediate,
+                }),
+              });
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok)
+                return status(
+                  "order-status",
+                  "Das Abo wurde bei PayPal angelegt, konnte hier aber noch nicht zugeordnet werden. Bitte mit der PayPal-Abo-ID den Support kontaktieren.",
+                  "error",
+                );
+              status(
+                "order-status",
+                `Bestellung erfasst. Vertragsnummer: ${result.vertragsnummer}. Die Bestätigung wird per E-Mail gesendet.`,
+                "success",
+              );
+              document.getElementById("after-order").hidden = false;
+            },
+            onError() {
+              status(
+                "order-status",
+                "PayPal konnte den Vorgang nicht abschließen. Es wurde hier keine Freischaltung vorgenommen.",
+                "error",
+              );
+            },
+          })
+          .render("#paypal-button-container");
+      }
+      async function hasExistingAccess(session) {
+        const { data: profiles } = await sb
+          .from("customer_profiles")
+          .select("id")
+          .eq("auth_user_id", session.user.id)
+          .limit(1);
+        if (!profiles?.length) return false;
+        const { data: subscriptions } = await sb
+          .from("subscriptions")
+          .select("id")
+          .eq("customer_id", profiles[0].id)
+          .in("status", [
+            "wird_geprueft",
+            "wartet_auf_leistungsbeginn",
+            "aktiv",
+            "kulanzzeit",
+            "gekuendigt_zum_ende",
+          ])
+          .limit(1);
+        return Boolean(subscriptions?.length);
+      }
+      async function updateSession() {
+        const {
+          data: { session },
+        } = await sb.auth.getSession();
+        if (!session) return;
+        currentSession = session;
+        document.getElementById("login-card").hidden = true;
+        document.getElementById("order-card").hidden = false;
+        document.getElementById("signed-in").textContent =
+          "Angemeldet als " + session.user.email;
+        await loadCatalog();
+        if (await hasExistingAccess(session)) {
+          document.getElementById("terms").closest("label").hidden = true;
+          document
+            .querySelectorAll('input[name="start"]')
+            .forEach((input) => (input.closest("label").hidden = true));
+          status(
+            "order-status",
+            "Für dieses Konto besteht bereits ein Jahreszugang. Es wird keine weitere Zahlung angeboten.",
+            "success",
+          );
+          document.getElementById("after-order").hidden = false;
+          return;
+        }
+        await renderPaypal();
+      }
+      document.getElementById("logout").onclick = async () => {
+        await sb.auth.signOut();
+        location.reload();
+      };
+      sb.auth.onAuthStateChange(() => updateSession());
+      loadCatalog().then(updateSession);
+    </script>
+  </body>
 </html>

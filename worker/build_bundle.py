@@ -6,6 +6,10 @@ SRC = str(HIER / "src") + "/"
 OUT = str(HIER / "dist" / "bundle.js")
 
 def strip(text, drop_export=False):
+    # ES-Module-Imports koennen ein- oder mehrzeilig sein. Im Dashboard-
+    # Bundle stehen alle Quelldateien bereits hintereinander.
+    text = re.sub(r'^import\s+\{.*?\}\s+from\s+["\'][^"\']+["\'];?\s*', '', text, flags=re.MULTILINE | re.DOTALL)
+    text = re.sub(r'^import\s+[^;]+;?\s*', '', text, flags=re.MULTILINE)
     lines = text.split("\n")
     result = []
     for line in lines:
@@ -19,6 +23,7 @@ def strip(text, drop_export=False):
 
 supabase = open(SRC + "supabase.js").read()
 paypal = open(SRC + "paypal.js").read()
+legal = open(SRC + "legal.js").read()
 index = open(SRC + "index.js").read()
 
 header = """// Löschmeier Test — Cloudflare Worker (zusammengefasste Datei für den
@@ -29,6 +34,7 @@ header = """// Löschmeier Test — Cloudflare Worker (zusammengefasste Datei f�
 
 out = header + "\n// ===== supabase.js =====\n\n" + strip(supabase)
 out += "\n// ===== paypal.js =====\n\n" + strip(paypal)
+out += "\n// ===== legal.js =====\n\n" + strip(legal)
 out += "\n// ===== index.js =====\n\n" + strip(index)
 
 with open(OUT, "w") as f:

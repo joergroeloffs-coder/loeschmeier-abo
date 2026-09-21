@@ -1,139 +1,73 @@
-# Löschmeier Test — Abo-Plattform
+# Löschmeier Föhr – Verkaufsplattform
 
-Testumgebung für eine vollständige Abo-Lösung: eigene Nutzerkonten,
-PayPal-Abonnements mit automatischer Freischaltung/Sperrung, Kunden- und
-Admin-Bereich. Basiert auf der bestehenden Test-App (Ordner `app/`), die
-unverändert weiterläuft — es kommt eine neue Zugriffsschicht davor.
+Verkaufs-, Vertrags- und Zugangsverwaltung für den privaten Föhr-Jahreszugang.
+Der Zugang kostet 12 Euro pro Jahr und ist auf zwei Geräte begrenzt. Nach zwölf
+Monaten Mindestlaufzeit läuft der Vertrag unbefristet weiter; ab dann kann
+jederzeit gekündigt werden und vorausbezahlte Restzeit wird anteilig erstattet.
+Eine deaktivierte Tarifvorlage hält den späteren Ausbau für Gemeinde- und
+Feuerwehrverträge offen.
 
-Föhr und Leck sind von diesem Projekt **nicht** betroffen und laufen
-unverändert mit dem bisherigen (einfacheren) System weiter.
+Die Leck-Version ist nicht Bestandteil dieses Projekts.
 
-## Architektur
+## Aufbau
 
-```
-Kunde  →  test.roewise.com (Cloudflare Pages, liefert app/)
-              │
-              ├─ Login/Konto  →  Supabase Auth (E-Mail-Link)
-              ├─ Zugriffsprüfung bei jeder Anfrage → Cloudflare Worker
-              │                                        │
-              │                                        ├─ liest/schreibt → Supabase (Datenbank, RLS)
-              │                                        └─ prüft Status bei → PayPal API
-              │
-PayPal  →  Webhook (Zahlungsereignisse) → Cloudflare Worker → Supabase
-```
+- `app/`: Registrieren, Bestellen, Kundenbereich, Kündigung, Widerruf,
+  Rechnungen und Rechtstexte
+- `worker/`: serverseitige PayPal-Prüfung, Webhooks, Zugangsprüfung,
+  E-Mail-Warteschlange und Admin-API
+- `db/schema.sql`: bisheriges Basisschema
+- `db/migration_sales_platform.sql`: Erweiterung für den Föhr-Verkauf
+- `setup/paypal_plan_erstellen.py`: erzeugt einen PayPal-Sandboxplan mit
+  genau einem Jahreszyklus zu 12 Euro
 
-- **Cloudflare Pages**: hostet die statische App (wie bisher bei Föhr/Leck)
-- **Cloudflare Worker**: einziger Ort mit geheimen Schlüsseln (PayPal-Secret,
-  Supabase Service-Role-Key). Prüft Webhooks, aktualisiert Abo-Status,
-  beantwortet "ist dieser Kunde berechtigt?"-Anfragen der App
-- **Supabase**: Nutzerkonten (E-Mail-Link-Login), Datenbank, Row Level
-  Security (jeder Kunde sieht nur eigene Daten)
-- **PayPal Subscriptions**: wiederkehrende Zahlung, sendet Webhooks bei
-  jedem Ereignis (Zahlung, Kündigung, Fehlschlag, ...)
+## Schutz vor versehentlichem Verkauf
 
-## Datenmodell
+`SALES_ENABLED` steht in `worker/wrangler.toml` standardmäßig auf `false`.
+Der Kaufbutton erscheint erst, wenn zusätzlich ein PayPal-Plan am öffentlichen
+Tarif hinterlegt ist und `RESEND_API_KEY` sowie `TRANSACTIONAL_FROM` vorhanden
+sind. Erst nach vollständigem Sandbox-Test darf `SALES_ENABLED` auf `true`
+gesetzt werden.
 
-Siehe `db/schema.sql` — wird einmalig im Supabase SQL-Editor ausgeführt.
+## Einmalige Einrichtung
 
-## Status
+1. `db/migration_sales_platform.sql` im Supabase SQL-Editor ausführen.
+2. Mit `setup/paypal_plan_erstellen.py` einen neuen Sandboxplan erzeugen.
+3. Dessen Plan-ID beim Tarif `foehr-jahr` in `tariffs.paypal_plan_id` eintragen.
+4. Worker deployen und Secrets setzen:
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `PAYPAL_SECRET`
+   - `PAYPAL_WEBHOOK_ID`
+   - `RESEND_API_KEY`
+5. KV-Binding `RATE_KV` für Admin-Login und öffentliche Rechtserklärungen
+   anbinden.
+6. In Supabase Auth die Redirect-URL `https://foehr.roewise.com/nutzer/`
+   freigeben.
+7. PayPal-Webhooks für Aktivierung, Zahlung, Zahlungsausfall, Kündigung,
+   Sperrung, Ablauf und Erstattung auf `/webhook/paypal` einrichten.
+8. Sandbox-Testmatrix vollständig durchführen; erst danach Verkauf aktivieren.
 
-- [x] Repo angelegt, bestehende Test-App als Basis übernommen
-- [x] Datenmodell entworfen und eingespielt (inkl. Row Level Security)
-- [x] Supabase-Projekt eingerichtet (Auth, Datenbank)
-- [x] PayPal-Sandbox-App + Produkt/Preisplan angelegt (1 €/Monat)
-- [x] Cloudflare Worker deployt (Webhook, Zugriffsprüfung, Kündigung, täglicher Abgleich)
-- [x] PayPal-Webhook eingerichtet und verifiziert
-- [x] Registrierungs-/Kaufseite (`app/registrieren.html`), live auf Cloudflare Pages
-- [x] **Erster kompletter Testkauf erfolgreich**: Anmeldung per E-Mail-Link →
-      PayPal-Abo abgeschlossen → Webhook kam an → Status automatisch auf
-      "aktiv" gesetzt — Kernfunktion des ganzen Systems bestätigt
-- [x] Eigene Domain `test.roewise.com` eingerichtet (Pages + Supabase Auth)
-- [x] Kundenbereich (`app/kundenbereich.html`): Abo-Status, Geräte, Kündigung
-- [x] Admin-Bereich (`app/admin.html`): Übersicht, Kundenliste, sperren/entsperren/Kulanz — getestet, funktioniert
-- [x] E-Mail-Versand: Resend eingerichtet, Domain verifiziert, als Custom SMTP
-      in Supabase hinterlegt — Anmelde-Links funktionieren jetzt ohne Limit
-      und kommen von `noreply@roewise.com`
-- [x] Rechtliche Seiten (Impressum, Datenschutz, AGB, Widerruf) — **Hinweis: vor echtem
-      Verkaufsstart von Rechtsberatung prüfen lassen**, siehe `app/agb.html`
-- [x] **Sicherheitsfix**: App (`nutzer/`, `nutzer-admin/`) war bisher ohne jede
-      Abo-Prüfung nutzbar — jetzt an `/api/zugriff` gekoppelt (`app/zugriffspruefung.js`),
-      inkl. 24h-Offline-Gnadenfrist für Einsatzsituationen
-- [x] XSS-Härtung im Admin-Bereich (E-Mail/Notiz-Felder werden jetzt escaped)
-- [x] Admin-Login gegen Rate Limiting abgesichert (KV-basiert, max. 30 Anfragen/Minute/IP)
-- [x] Rechnungsstellung: automatische fortlaufende Nummer (`JAHR-NNNN`) bei
-      jeder Zahlung, druckbare Rechnung (`app/rechnung.html`), Liste im
-      Kundenbereich — **Steuernummer noch Platzhalter** (Gewerbe noch nicht
-      angemeldet), **Kleinunternehmer-Status noch offen**, beides in
-      `app/rechnung.html` nachtragen, sobald bekannt
-- [x] Testfall: Kündigung im Kundenbereich — bestätigt (PayPal storniert, Zugang bis Vertragsende)
-- [x] Testfall: Gerätelimit (max. 2 Geräte) — bestätigt, 3. Gerät korrekt blockiert
-- [ ] Weitere Testfälle (Zahlungsausfall, Rückerstattung)
-- [ ] Live-Umstellung (echtes PayPal-Konto statt Sandbox)
-- [ ] Anleitung (`app/anleitung/index.html`) um browserabhängige Installations-
-      Hinweise ergänzen: Chrome/Edge = echte Vollbild-App-Installation,
-      Firefox Desktop = nur Verknüpfung im Browser-Fenster (kein Vollbild),
-      iOS/Safari = eigener Ablauf über "Teilen" → "Zum Home-Bildschirm"
-- [x] Kunde kann eigene Geräte selbst entfernen (`app/kundenbereich.html`)
-- [x] **Fix**: `test.roewise.com` (Wurzel-Adresse) zeigte bisher direkt die
-      interne Hauptversion (Datenpflege-Tool) statt einer Registrierungsseite —
-      Hauptversion liegt jetzt unter `/verwaltung.html`, Wurzel leitet zu
-      `/registrieren.html` weiter
+## Pflicht-Tests vor Livegang
 
-## Deine Hauptversion (Datenpflege-Tool)
+- Bestellung mit sofortigem und verzögertem Leistungsbeginn
+- falscher PayPal-Plan, fremde `custom_id`, falscher Betrag und falsche Währung
+- doppelter Webhook und vorübergehender Datenbankfehler
+- Kündigung angemeldet und über die öffentliche Kündigungsseite
+- Widerruf zugeordnet und nicht automatisch zuordenbar
+- zwei Geräte erlaubt, drittes Gerät gesperrt, Gerät wieder entfernen
+- Vertragsende, Zahlungsausfall, Erstattung und ausgefallene Transaktions-E-Mail
+- Rechnung als Kleinbetragsrechnung und lückenfreie Rechnungsnummern
 
-Nach der Umbenennung erreichst du dein persönliches Werkzeug zum Pflegen der
-Stellen-Daten jetzt unter:
+## Entwicklung
 
-```
-https://test.roewise.com/verwaltung.html
+```bash
+cd worker
+npm test
+python3 build_bundle.py
+node --check dist/bundle.js
 ```
 
-(Vorher war das unter der Wurzel-Adresse selbst erreichbar — das war
-öffentlich sichtbar und ist jetzt behoben.)
+`worker/dist/bundle.js` ist nur für den Cloudflare-Dashboard-Editor gedacht
+und wird aus den Dateien unter `worker/src/` erzeugt.
 
-## Admin-Login: Rate Limiting
-
-`admin.html`/`/api/admin/*` sind jetzt zusätzlich über einen KV-Speicher
-(`RATE_KV`, Namespace `loeschmeier-admin-rate`) gegen Passwort-Brute-Force
-abgesichert: max. 30 Anfragen pro Minute und IP, danach kurzzeitige Sperre
-(HTTP 429).
-
-## Worker-Code
-
-Liegt in `worker/`. Nicht-geheime Werte (Supabase-URL, anon-Key, PayPal
-Client ID) stehen bereits in `worker/wrangler.toml`. Drei geheime Werte
-fehlen noch — die trägst du direkt im Cloudflare-Dashboard ein, nie hier
-im Repo oder im Chat:
-
-- `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Project Settings → API → service_role
-- `PAYPAL_SECRET` — PayPal Developer → App → Secret (das, was du mir NICHT genannt hast)
-- `PAYPAL_WEBHOOK_ID` — entsteht erst beim Einrichten des Webhooks (nächster Schritt)
-
-## Nächste Schritte für dich
-
-### 1. Worker bei Cloudflare anlegen und deployen
-1. Auf dash.cloudflare.com einloggen (dein bestehendes Cloudflare-Konto,
-   das du schon für den Wasserentnahme-Zugang-Worker nutzt)
-2. "Workers & Pages" → "Create" → "Create Worker" → Name: `loeschmeier-abo-worker`
-3. Im Worker-Editor: kompletten Inhalt von `worker/src/index.js`,
-   `worker/src/supabase.js` und `worker/src/paypal.js` einfügen — am
-   einfachsten, wenn du mir sagst, dass du bereit bist, dann gebe ich dir
-   die genaue Klick-für-Klick-Anleitung für den Dashboard-Editor (der
-   kennt standardmäßig nur eine Datei, dafür braucht es einen Kniff)
-4. Unter "Settings" → "Variables and Secrets": die drei geheimen Werte
-   oben als **Secret** eintragen (nicht als normale Variable)
-5. Unter "Triggers" → "Cron Triggers": `0 3 * * *` eintragen (täglicher
-   Abgleich um 3 Uhr nachts)
-
-### 2. PayPal-Webhook einrichten
-1. developer.paypal.com → deine Sandbox-App öffnen → "Add Webhook"
-2. URL: `https://<deine-worker-adresse>.workers.dev/webhook/paypal`
-3. Ereignisse auswählen: `BILLING.SUBSCRIPTION.ACTIVATED`,
-   `BILLING.SUBSCRIPTION.CANCELLED`, `BILLING.SUBSCRIPTION.SUSPENDED`,
-   `BILLING.SUBSCRIPTION.EXPIRED`, `BILLING.SUBSCRIPTION.PAYMENT.FAILED`,
-   `PAYMENT.SALE.COMPLETED`, `PAYMENT.SALE.REFUNDED`
-4. Die dabei erzeugte **Webhook ID** mir nennen (die ist nicht geheim,
-   nur zur Zuordnung) — kommt dann als dritter Secret-Wert in Cloudflare
-
-Sag Bescheid, wenn du bereit für Schritt 1 bist, dann führe ich dich durch
-den Cloudflare-Editor.
+Die Rechtstexte sind auf den derzeit umgesetzten Ablauf zugeschnitten, ersetzen
+aber keine individuelle anwaltliche und steuerliche Prüfung vor einem Livegang.

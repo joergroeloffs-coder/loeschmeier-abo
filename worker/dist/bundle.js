@@ -53,6 +53,13 @@ function supabaseClient(env) {
 
     // Zeilen loeschen, die den Query-Filter erfuellen
     delete: (table, query) => request(`/${table}?${query}`, { method: "DELETE" }),
+
+    // Datenbankfunktionen fuer atomare Operationen (z.B. Rechnungsnummern).
+    rpc: (functionName, args = {}) =>
+      request(`/rpc/${functionName}`, {
+        method: "POST",
+        body: JSON.stringify(args),
+      }),
   };
 }
 
@@ -148,8 +155,128 @@ async function kuendigeAbo(env, paypalSubscriptionId, grund) {
   return res.status === 204;
 }
 
-// ===== index.js =====
+async function erstatteZahlung(env, paypalSaleId, betrag = null) {
+  const token = await holeZugriffstoken(env);
+  const res = await fetch(`${env.PAYPAL_API_BASE}/v1/payments/sale/${paypalSaleId}/refund`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(betrag ? {
+      amount: { total: betrag.value, currency: betrag.currency },
+    } : {}),
+  });
+  if (!res.ok) throw new Error(`PayPal-Erstattung fehlgeschlagen: ${res.status}`);
+  return res.json();
+}
 
+// ===== legal.js =====
+
+const LEGAL_VERSION = "2026-09-21";
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidEmail(value) {
+  const email = normalizeEmail(value);
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function cleanText(value, maxLength = 500) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, maxLength);
+}
+
+function validatePublicDeclaration(body, type) {
+  const name = cleanText(body.name, 160);
+  const email = normalizeEmail(body.email);
+  const contractReference = cleanText(body.vertragsreferenz, 160);
+  const contractLabel = cleanText(body.vertragsbezeichnung || "Löschmeier Föhr – Jahreszugang", 200);
+  if (!name || !isValidEmail(email) || !contractReference || !contractLabel) {
+    return { ok: false, error: "ungueltige_oder_fehlende_angaben" };
+  }
+  if (type === "kuendigung" && !["ordentlich", "ausserordentlich"].includes(body.erklaerungsart)) {
+    return { ok: false, error: "ungueltige_kuendigungsart" };
+  }
+  const requestedEnd = body.gewuenschtes_ende ? new Date(body.gewuenschtes_ende) : null;
+  if (requestedEnd && Number.isNaN(requestedEnd.getTime())) {
+    return { ok: false, error: "ungueltiges_wunschdatum" };
+  }
+  return {
+    ok: true,
+    value: {
+      name,
+      email,
+      contractReference,
+      contractLabel,
+      declarationKind: type === "kuendigung" ? body.erklaerungsart : null,
+      reason: cleanText(body.grund, 1000) || null,
+      requestedEnd,
+    },
+  };
+}
+
+function createContractNumber(now = new Date(), random = crypto.randomUUID()) {
+  const year = now.getUTCFullYear();
+  return `LM-${year}-${String(random).replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+}
+
+function calculateProRataRefund({ amountCents, periodStart, periodEnd, effectiveAt }) {
+  const start = new Date(periodStart).getTime();
+  const end = new Date(periodEnd).getTime();
+  const effective = new Date(effectiveAt).getTime();
+  if (![start, end, effective].every(Number.isFinite) || end <= start || amountCents <= 0) return 0;
+  const unused = Math.max(0, end - Math.max(start, effective));
+  return Math.min(amountCents, Math.round(amountCents * unused / (end - start)));
+}
+
+async function sendTextEmail(env, { to, subject, text, idempotencyKey }) {
+  if (!env.RESEND_API_KEY || !env.TRANSACTIONAL_FROM) {
+    throw new Error("Transaktions-E-Mail ist nicht konfiguriert");
+  }
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: JSON.stringify({
+      from: env.TRANSACTIONAL_FROM,
+      to: [to],
+      subject,
+      text,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`E-Mail-Versand fehlgeschlagen: ${response.status}`);
+  }
+  return response.json();
+}
+
+function declarationConfirmation({ type, receiptId, receivedAt, data, effectiveAt }) {
+  const label = type === "widerruf" ? "Widerruf" : "Kündigung";
+  return [
+    `${label} – Eingangsbestätigung`,
+    "",
+    `Vorgangsnummer: ${receiptId}`,
+    `Eingegangen am: ${receivedAt}`,
+    `Name: ${data.name}`,
+    `E-Mail: ${data.email}`,
+    `Vertragsreferenz: ${data.contractReference}`,
+    `Vertrag: ${data.contractLabel}`,
+    data.declarationKind ? `Art: ${data.declarationKind}` : null,
+    data.reason ? `Grund: ${data.reason}` : null,
+    data.requestedEnd ? `Gewünschtes Ende: ${data.requestedEnd.toISOString()}` : null,
+    effectiveAt ? `Vorgesehenes Vertragsende: ${effectiveAt}` : null,
+    "",
+    `Ihre Erklärung wurde am ${receivedAt} elektronisch übermittelt.`,
+    "Kontakt: wasserentnahme-foehr@web.de",
+  ].filter(Boolean).join("\n");
+}
+
+// ===== index.js =====
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -177,6 +304,15 @@ export default {
       if (url.pathname === "/api/zugriff" && request.method === "GET") {
         return await pruefeZugriff(request, env);
       }
+      if (url.pathname === "/api/katalog" && request.method === "GET") {
+        return await katalog(env);
+      }
+      if (url.pathname === "/api/kuendigung-erklaeren" && request.method === "POST") {
+        return await rechtserklaerung(request, env, "kuendigung");
+      }
+      if (url.pathname === "/api/widerrufen" && request.method === "POST") {
+        return await rechtserklaerung(request, env, "widerruf");
+      }
       if (url.pathname === "/api/kuendigen" && request.method === "POST") {
         return await kundeKuendigt(request, env);
       }
@@ -197,9 +333,296 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(taeglicherAbgleich(env));
+    ctx.waitUntil(Promise.all([taeglicherAbgleich(env), versendeAusstehendeNachrichten(env)]));
   },
 };
+
+function filterWert(value) {
+  return encodeURIComponent(String(value || ""));
+}
+
+function verkaufBereit(env) {
+  return env.SALES_ENABLED === "true" && Boolean(env.RESEND_API_KEY && env.TRANSACTIONAL_FROM);
+}
+
+async function katalog(env) {
+  const db = supabaseClient(env);
+  const tarife = await db.select(
+    "tariffs",
+    "aktiv=eq.true&oeffentlich=eq.true&select=code,slug,bezeichnung,beschreibung,preis_cent,waehrung,intervall,max_geraete,paypal_plan_id"
+  );
+  return json({
+    verkaufAktiv: verkaufBereit(env),
+    rechtstexteVersion: LEGAL_VERSION,
+    paypalClientId: verkaufBereit(env) ? env.PAYPAL_CLIENT_ID : null,
+    tarife: tarife.map(({ paypal_plan_id, ...tarif }) => ({
+      ...tarif,
+      kaufbar: verkaufBereit(env) && Boolean(paypal_plan_id),
+      paypalPlanId: verkaufBereit(env) ? paypal_plan_id : null,
+    })),
+  });
+}
+
+async function nachrichtVormerken(db, env, { customerId = null, declarationId = null, to, subject, text }) {
+  const rows = await db.insert("outbound_messages", [{
+    customer_id: customerId,
+    legal_declaration_id: declarationId,
+    empfaenger: to,
+    betreff: subject,
+    inhalt: text,
+  }]);
+  try {
+    await sendTextEmail(env, { to, subject, text, idempotencyKey: `outbound/${rows[0].id}` });
+    await db.update("outbound_messages", `id=eq.${rows[0].id}`, {
+      status: "gesendet",
+      versuche: 1,
+      gesendet_am: new Date().toISOString(),
+    });
+  } catch (error) {
+    await db.update("outbound_messages", `id=eq.${rows[0].id}`, {
+      status: "ausstehend",
+      versuche: 1,
+      letzter_fehler: String(error).slice(0, 500),
+    });
+  }
+}
+
+async function versendeAusstehendeNachrichten(env) {
+  if (!env.RESEND_API_KEY || !env.TRANSACTIONAL_FROM) return;
+  const db = supabaseClient(env);
+  const messages = await db.select(
+    "outbound_messages",
+    "status=eq.ausstehend&versuche=lt.8&select=id,empfaenger,betreff,inhalt,versuche&order=erstellt_am.asc&limit=25"
+  );
+  for (const message of messages) {
+    try {
+      await sendTextEmail(env, {
+        to: message.empfaenger,
+        subject: message.betreff,
+        text: message.inhalt,
+        idempotencyKey: `outbound/${message.id}`,
+      });
+      await db.update("outbound_messages", `id=eq.${message.id}`, {
+        status: "gesendet",
+        versuche: message.versuche + 1,
+        letzter_fehler: null,
+        gesendet_am: new Date().toISOString(),
+      });
+    } catch (error) {
+      await db.update("outbound_messages", `id=eq.${message.id}`, {
+        versuche: message.versuche + 1,
+        letzter_fehler: String(error).slice(0, 500),
+      });
+    }
+  }
+}
+
+async function rechtserklaerung(request, env, type) {
+  if (await rechtserklaerungRateLimit(request, env)) {
+    return json({ fehler: "zu_viele_versuche_bitte_spaeter_erneut" }, 429);
+  }
+  const body = await request.json().catch(() => ({}));
+  const validation = validatePublicDeclaration(body, type);
+  if (!validation.ok) return json({ fehler: validation.error }, 400);
+
+  const data = validation.value;
+  const db = supabaseClient(env);
+  const profiles = await db.select(
+    "customer_profiles",
+    `email=eq.${filterWert(data.email)}&select=id,email`
+  );
+  let subscription = null;
+  let customerId = null;
+  if (profiles.length > 0) {
+    customerId = profiles[0].id;
+    const subscriptions = await db.select(
+      "subscriptions",
+      `customer_id=eq.${customerId}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis`
+    );
+    subscription = subscriptions.find((entry) =>
+      entry.vertragsnummer === data.contractReference || entry.paypal_subscription_id === data.contractReference
+    ) || null;
+  }
+
+  const now = new Date().toISOString();
+  let effectiveAt = null;
+  let processingStatus = subscription ? "zugeordnet" : "manuelle_pruefung";
+  let cancellationRefundCents = 0;
+  let refunded = false;
+  if (subscription) {
+    if (type === "kuendigung") {
+      const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd);
+      effectiveAt = result.effectiveAt;
+      processingStatus = result.processingStatus;
+      cancellationRefundCents = result.refundedCents;
+    } else if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
+      const cancelled = await kuendigeAbo(
+        env,
+        subscription.paypal_subscription_id,
+        "Widerruf durch Kunden"
+      );
+      if (!cancelled) processingStatus = "paypal_pruefung_noetig";
+    }
+    if (type === "widerruf") {
+      const payments = await db.select(
+        "payments",
+        `subscription_id=eq.${subscription.id}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
+      );
+      if (payments.length > 0 && payments[0].paypal_capture_id) {
+        try {
+          await erstatteZahlung(env, payments[0].paypal_capture_id);
+          await db.update("payments", `id=eq.${payments[0].id}`, {
+            status: "erstattet",
+            erstattet_cent: payments[0].betrag_cent,
+            erstattet_am: now,
+          });
+          refunded = true;
+          processingStatus = "erstattet";
+        } catch (error) {
+          console.error("Automatische Widerrufserstattung fehlgeschlagen", error);
+          processingStatus = "erstattung_manuell_pruefen";
+        }
+      } else {
+        processingStatus = "keine_zahlung_gefunden";
+      }
+    }
+    if (type === "widerruf") {
+      effectiveAt = now;
+      await db.update("subscriptions", `id=eq.${subscription.id}`, {
+        status: refunded ? "erstattet" : "widerrufen",
+        gekuendigt_am: now,
+        kuendigungswirksam_am: now,
+        aktualisiert_am: now,
+      });
+    }
+  }
+
+  const declarationText = type === "widerruf"
+    ? `Hiermit widerrufe ich den Vertrag ${data.contractReference}.`
+    : `Hiermit kündige ich den Vertrag ${data.contractReference} ${data.declarationKind}.`;
+  const rows = await db.insert("legal_declarations", [{
+    typ: type,
+    subscription_id: subscription?.id || null,
+    name: data.name,
+    email: data.email,
+    vertragsreferenz: data.contractReference,
+    vertragsbezeichnung: data.contractLabel,
+    erklaerungsart: data.declarationKind,
+    grund: data.reason,
+    gewuenschtes_ende: data.requestedEnd?.toISOString() || null,
+    wirksam_zum: effectiveAt,
+    erklaerungstext: declarationText,
+    zugeordnet: Boolean(subscription),
+    verarbeitungsstatus: processingStatus,
+  }]);
+  let confirmation = declarationConfirmation({
+    type,
+    receiptId: rows[0].id,
+    receivedAt: now,
+    data,
+    effectiveAt,
+  });
+  if (type === "widerruf") {
+    confirmation += refunded
+      ? "\n\nDie über PayPal erfasste Zahlung wurde zur vollständigen Erstattung angewiesen."
+      : "\n\nEine etwaige Zahlung wird unverzüglich geprüft und spätestens innerhalb der gesetzlichen Frist erstattet.";
+  } else if (cancellationRefundCents > 0) {
+    confirmation += `\n\nAnteilige Erstattung angewiesen: ${(cancellationRefundCents / 100).toFixed(2).replace(".", ",")} EUR.`;
+  }
+  await db.update("legal_declarations", `id=eq.${rows[0].id}`, { bestaetigt_am: now });
+  await nachrichtVormerken(db, env, {
+    customerId,
+    declarationId: rows[0].id,
+    to: data.email,
+    subject: `${type === "widerruf" ? "Widerruf" : "Kündigung"} – Eingangsbestätigung ${rows[0].id}`,
+    text: confirmation,
+  });
+
+  return json({
+    status: "eingegangen",
+    vorgangsnummer: rows[0].id,
+    eingegangen_am: now,
+    bestaetigung: confirmation,
+  });
+}
+
+async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null) {
+  const now = new Date();
+  const minimumEnd = subscription.mindestlaufzeit_bis
+    ? new Date(subscription.mindestlaufzeit_bis)
+    : new Date(subscription.bezahlt_bis || now);
+  const paidUntil = new Date(subscription.bezahlt_bis || minimumEnd);
+  let effective = now < minimumEnd ? minimumEnd : now;
+  if (requestedEnd && requestedEnd > effective) effective = requestedEnd;
+  if (effective > paidUntil) effective = paidUntil;
+
+  let processingStatus = "zugeordnet";
+  let refundedCents = 0;
+  if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
+    const cancelled = await kuendigeAbo(env, subscription.paypal_subscription_id, "Kündigung durch Kunden");
+    if (!cancelled) processingStatus = "paypal_pruefung_noetig";
+  }
+
+  // Nach der Mindestlaufzeit darf jederzeit beendet werden. Eine bereits
+  // gezahlte Jahresrate wird fuer die ungenutzte Restzeit anteilig erstattet.
+  if (now >= minimumEnd && effective < paidUntil) {
+    const payments = await db.select(
+      "payments",
+      `subscription_id=eq.${subscription.id}&status=in.(erfolgreich,teilweise_erstattet)&select=id,paypal_capture_id,betrag_cent,waehrung,zeitpunkt,erstattet_cent&order=zeitpunkt.desc&limit=1`
+    );
+    if (payments.length > 0 && payments[0].paypal_capture_id) {
+      const payment = payments[0];
+      const refundCents = Math.min(
+        payment.betrag_cent - (payment.erstattet_cent || 0),
+        calculateProRataRefund({
+          amountCents: payment.betrag_cent,
+          periodStart: payment.zeitpunkt,
+          periodEnd: paidUntil,
+          effectiveAt: effective,
+        })
+      );
+      if (refundCents > 0) {
+        try {
+          await erstatteZahlung(env, payment.paypal_capture_id, {
+            value: (refundCents / 100).toFixed(2),
+            currency: payment.waehrung,
+          });
+          const totalRefunded = (payment.erstattet_cent || 0) + refundCents;
+          await db.update("payments", `id=eq.${payment.id}`, {
+            status: totalRefunded >= payment.betrag_cent ? "erstattet" : "teilweise_erstattet",
+            erstattet_cent: totalRefunded,
+            erstattet_am: now.toISOString(),
+          });
+          refundedCents = refundCents;
+          processingStatus = "anteilig_erstattet";
+        } catch (error) {
+          console.error("Anteilige Erstattung fehlgeschlagen", error);
+          processingStatus = "erstattung_manuell_pruefen";
+        }
+      }
+    } else {
+      processingStatus = "erstattung_manuell_pruefen";
+    }
+  }
+
+  await db.update("subscriptions", `id=eq.${subscription.id}`, {
+    status: "gekuendigt_zum_ende",
+    gekuendigt_am: now.toISOString(),
+    kuendigungswirksam_am: effective.toISOString(),
+    aktualisiert_am: now.toISOString(),
+  });
+  return { effectiveAt: effective.toISOString(), processingStatus, refundedCents };
+}
+
+async function rechtserklaerungRateLimit(request, env) {
+  if (!env.RATE_KV) return false;
+  const ip = request.headers.get("CF-Connecting-IP") || "unbekannt";
+  const key = `rechtserklaerung:${ip}`;
+  const current = parseInt((await env.RATE_KV.get(key)) || "0", 10);
+  if (current >= 10) return true;
+  await env.RATE_KV.put(key, String(current + 1), { expirationTtl: 3600 });
+  return false;
+}
 
 // ---------- Webhook ----------
 
@@ -218,9 +641,9 @@ async function verarbeiteWebhook(request, env) {
   // Idempotenz: jedes PayPal-Ereignis nur einmal verarbeiten.
   const vorhanden = await db.select(
     "webhook_events",
-    `paypal_event_id=eq.${ereignis.id}&select=id`
+    `paypal_event_id=eq.${filterWert(ereignis.id)}&select=id,ergebnis`
   );
-  if (vorhanden.length > 0) {
+  if (vorhanden.length > 0 && vorhanden[0].ergebnis === "ok") {
     return json({ status: "bereits verarbeitet" });
   }
 
@@ -233,17 +656,22 @@ async function verarbeiteWebhook(request, env) {
     fehlermeldung = String(e).slice(0, 500);
   }
 
-  await db.insert("webhook_events", [
-    {
-      paypal_event_id: ereignis.id,
-      event_type: ereignis.event_type,
-      paypal_subscription_id: ereignis.resource?.id || ereignis.resource?.billing_agreement_id || null,
-      ergebnis,
-      fehlermeldung,
-    },
-  ]);
+  const protokoll = {
+    event_type: ereignis.event_type,
+    paypal_subscription_id: ereignis.resource?.id || ereignis.resource?.billing_agreement_id || null,
+    verarbeitet_am: new Date().toISOString(),
+    ergebnis,
+    fehlermeldung,
+  };
+  if (vorhanden.length > 0) {
+    await db.update("webhook_events", `id=eq.${vorhanden[0].id}`, protokoll);
+  } else {
+    await db.insert("webhook_events", [{ paypal_event_id: ereignis.id, ...protokoll }]);
+  }
 
-  return json({ status: ergebnis });
+  // PayPal wiederholt Webhooks nur bei einem Fehlerstatus. So gehen
+  // voruebergehende Datenbank- oder Netzwerkfehler nicht still verloren.
+  return json({ status: ergebnis }, ergebnis === "ok" ? 200 : 500);
 }
 
 async function verarbeiteEreignis(db, env, ereignis) {
@@ -252,8 +680,17 @@ async function verarbeiteEreignis(db, env, ereignis) {
 
   switch (typ) {
     case "BILLING.SUBSCRIPTION.ACTIVATED": {
+      const abos = await db.select(
+        "subscriptions",
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,sofortiger_beginn,leistungsbeginn_am`
+      );
+      if (abos.length === 0) throw new Error("PayPal-Abo ist lokal noch nicht angelegt");
+      const leistungsbeginn = abos[0].leistungsbeginn_am
+        ? new Date(abos[0].leistungsbeginn_am)
+        : new Date();
+      const darfStarten = abos[0].sofortiger_beginn || leistungsbeginn <= new Date();
       await db.update("subscriptions", `paypal_subscription_id=eq.${resource.id}`, {
-        status: "aktiv",
+        status: darfStarten ? "aktiv" : "wartet_auf_leistungsbeginn",
         paypal_payer_id: resource.subscriber?.payer_id || null,
         beginn: resource.start_time || new Date().toISOString(),
         naechste_zahlung: resource.billing_info?.next_billing_time || null,
@@ -266,30 +703,48 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // Wiederkehrende Zahlung erfolgreich. billing_agreement_id ist die PayPal-Subscription-ID.
       const subId = resource.billing_agreement_id;
       if (!subId) break;
-      const abos = await db.select("subscriptions", `paypal_subscription_id=eq.${subId}&select=id,status`);
-      if (abos.length === 0) break;
+      const abos = await db.select(
+        "subscriptions",
+        `paypal_subscription_id=eq.${filterWert(subId)}&select=id,status,sofortiger_beginn,leistungsbeginn_am,bezahlt_bis,tariffs(preis_cent,waehrung)`
+      );
+      if (abos.length === 0) throw new Error("PayPal-Zahlung kann noch keinem lokalen Abo zugeordnet werden");
       const abo = abos[0];
 
       const betragCent = Math.round(parseFloat(resource.amount?.total || "0") * 100);
-      const neueZahlung = await db.insert("payments", [
-        {
-          subscription_id: abo.id,
-          paypal_capture_id: resource.id,
-          betrag_cent: betragCent,
-          waehrung: resource.amount?.currency || "EUR",
-          status: "erfolgreich",
-        },
-      ]);
-
-      await erstelleRechnung(db, abo.id, neueZahlung[0].id, betragCent);
+      if (
+        betragCent !== abo.tariffs?.preis_cent ||
+        String(resource.amount?.currency || "").toUpperCase() !== String(abo.tariffs?.waehrung || "").toUpperCase()
+      ) {
+        throw new Error("PayPal-Zahlung stimmt nicht mit dem gebuchten Tarif ueberein");
+      }
+      let zahlungen = await db.select(
+        "payments",
+        `paypal_capture_id=eq.${filterWert(resource.id)}&select=id`
+      );
+      if (zahlungen.length === 0) {
+        zahlungen = await db.insert("payments", [
+          {
+            subscription_id: abo.id,
+            paypal_capture_id: resource.id,
+            betrag_cent: betragCent,
+            waehrung: resource.amount?.currency || "EUR",
+            status: "erfolgreich",
+          },
+        ]);
+      }
+      const rechnungen = await db.select("invoices", `payment_id=eq.${zahlungen[0].id}&select=id`);
+      if (rechnungen.length === 0) {
+        await erstelleRechnung(db, abo.id, zahlungen[0].id, betragCent);
+      }
 
       // Aktiviert das Abo (falls es aus Kulanzzeit/ueberfaellig kam) und
       // aktualisiert den bezahlten Zeitraum anhand der aktuellen PayPal-Daten.
       const details = await holeAboDetails(env, subId);
+      const darfStarten = abo.sofortiger_beginn || (abo.leistungsbeginn_am && new Date(abo.leistungsbeginn_am) <= new Date());
       await db.update("subscriptions", `id=eq.${abo.id}`, {
-        status: "aktiv",
+        status: darfStarten ? "aktiv" : "wartet_auf_leistungsbeginn",
         naechste_zahlung: details.billing_info?.next_billing_time || null,
-        bezahlt_bis: details.billing_info?.next_billing_time || null,
+        bezahlt_bis: details.billing_info?.next_billing_time || abo.bezahlt_bis,
         kulanz_bis: null,
         aktualisiert_am: new Date().toISOString(),
       });
@@ -348,7 +803,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
       const aktualisiertePayments = await db.update(
         "payments",
         `paypal_capture_id=eq.${urspruenglicheSaleId}`,
-        { status: "erstattet" }
+        { status: "erstattet", erstattet_am: new Date().toISOString() }
       );
       if (aktualisiertePayments.length > 0) {
         await db.update("subscriptions", `id=eq.${aktualisiertePayments[0].subscription_id}`, {
@@ -398,7 +853,7 @@ async function pruefeZugriff(request, env) {
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${customerId}&select=id,status,manuell_gesperrt,bezahlt_bis&order=erstellt_am.desc&limit=1`
+    `customer_id=eq.${customerId}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am&order=erstellt_am.desc&limit=1`
   );
   if (abos.length === 0) {
     return json({ erlaubt: false, grund: "kein_abo" });
@@ -411,7 +866,13 @@ async function pruefeZugriff(request, env) {
   if (!ERLAUBTE_STATUS.has(abo.status)) {
     return json({ erlaubt: false, grund: "abo_status_" + abo.status });
   }
-  if (abo.status === "gekuendigt_zum_ende" && abo.bezahlt_bis && new Date(abo.bezahlt_bis) < new Date()) {
+  if (abo.status === "gekuendigt_zum_ende" && !abo.bezahlt_bis) {
+    return json({ erlaubt: false, grund: "vertragsende_ungeklaert" });
+  }
+  if (abo.kuendigungswirksam_am && new Date(abo.kuendigungswirksam_am) <= new Date()) {
+    return json({ erlaubt: false, grund: "kuendigung_wirksam" });
+  }
+  if (abo.bezahlt_bis && new Date(abo.bezahlt_bis) < new Date()) {
     return json({ erlaubt: false, grund: "bezahlter_zeitraum_beendet" });
   }
 
@@ -441,6 +902,7 @@ async function pruefeZugriff(request, env) {
 // Rueckleitung von PayPal Zugang gewaehrt.
 
 async function aboAnlegen(request, env) {
+  if (!verkaufBereit(env)) return json({ fehler: "verkauf_nicht_freigeschaltet" }, 503);
   const authHeader = request.headers.get("Authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "");
   const nutzer = await holeNutzer(env, accessToken);
@@ -448,7 +910,7 @@ async function aboAnlegen(request, env) {
 
   const body = await request.json().catch(() => ({}));
   const { paypal_subscription_id, tariff_code } = body;
-  if (!paypal_subscription_id || !tariff_code) {
+  if (!paypal_subscription_id || !tariff_code || body.agb_akzeptiert !== true || typeof body.sofortiger_beginn !== "boolean") {
     return json({ fehler: "fehlende_angaben" }, 400);
   }
 
@@ -468,28 +930,123 @@ async function aboAnlegen(request, env) {
     customerId = profile[0].id;
   }
 
-  const tarife = await db.select("tariffs", `code=eq.${tariff_code}&select=id`);
-  if (tarife.length === 0) return json({ fehler: "unbekannter_tarif" }, 400);
+  const tarife = await db.select(
+    "tariffs",
+    `code=eq.${filterWert(tariff_code)}&aktiv=eq.true&oeffentlich=eq.true&select=id,code,bezeichnung,preis_cent,waehrung,paypal_plan_id`
+  );
+  if (tarife.length === 0 || !tarife[0].paypal_plan_id) {
+    return json({ fehler: "unbekannter_oder_nicht_kaufbarer_tarif" }, 400);
+  }
+
+  // Browserdaten sind nicht vertrauenswuerdig: Abo, Plan, Status und die beim
+  // Erstellen eingebettete Supabase-Nutzer-ID werden direkt bei PayPal geprueft.
+  const paypalDetails = await holeAboDetails(env, paypal_subscription_id);
+  const paypalStatus = String(paypalDetails.status || "").toUpperCase();
+  if (paypalDetails.plan_id !== tarife[0].paypal_plan_id || !["APPROVAL_PENDING", "APPROVED", "ACTIVE"].includes(paypalStatus)) {
+    return json({ fehler: "paypal_abo_ungueltig" }, 400);
+  }
+  if (paypalDetails.custom_id !== nutzer.id) {
+    return json({ fehler: "paypal_abo_gehoert_nicht_zum_konto" }, 400);
+  }
 
   // Verhindert Duplikate, falls der Kunde die Seite neu laedt.
   const vorhanden = await db.select(
     "subscriptions",
-    `paypal_subscription_id=eq.${paypal_subscription_id}&select=id`
+    `paypal_subscription_id=eq.${filterWert(paypal_subscription_id)}&select=id,vertragsnummer,leistungsbeginn_am`
   );
   if (vorhanden.length > 0) {
-    return json({ status: "bereits_angelegt" });
+    return json({
+      status: "bereits_angelegt",
+      vertragsnummer: vorhanden[0].vertragsnummer,
+      leistungsbeginn_am: vorhanden[0].leistungsbeginn_am,
+    });
   }
 
-  await db.insert("subscriptions", [
+  const andereVertraege = await db.select(
+    "subscriptions",
+    `customer_id=eq.${customerId}&status=in.(wird_geprueft,wartet_auf_leistungsbeginn,aktiv,kulanzzeit,gekuendigt_zum_ende)&select=id&limit=1`
+  );
+  if (andereVertraege.length > 0) {
+    await kuendigeAbo(env, paypal_subscription_id, "Doppelte Bestellung verhindert");
+    return json({ fehler: "jahreszugang_bereits_vorhanden" }, 409);
+  }
+
+  const now = new Date();
+  const paypalStart = paypalDetails.start_time ? new Date(paypalDetails.start_time) : now;
+  const performanceStart = body.sofortiger_beginn ? now : paypalStart;
+  if (!body.sofortiger_beginn) {
+    const delayDays = (performanceStart.getTime() - now.getTime()) / 86400000;
+    if (!Number.isFinite(delayDays) || delayDays < 13 || delayDays > 15) {
+      return json({ fehler: "paypal_leistungsbeginn_ungueltig" }, 400);
+    }
+  }
+  const contractEnd = new Date(performanceStart);
+  contractEnd.setUTCFullYear(contractEnd.getUTCFullYear() + 1);
+  const contractNumber = createContractNumber(now);
+  const subscriptions = await db.insert("subscriptions", [
     {
       customer_id: customerId,
       tariff_id: tarife[0].id,
       status: "wird_geprueft",
       paypal_subscription_id,
+      vertragsnummer: contractNumber,
+      sofortiger_beginn: body.sofortiger_beginn,
+      leistungsbeginn_am: performanceStart.toISOString(),
+      mindestlaufzeit_bis: contractEnd.toISOString(),
+      bezahlt_bis: contractEnd.toISOString(),
+      agb_version: LEGAL_VERSION,
+      widerruf_version: LEGAL_VERSION,
+      datenschutz_version: LEGAL_VERSION,
     },
   ]);
 
-  return json({ status: "angelegt" });
+  await db.insert("legal_acceptances", [{
+    subscription_id: subscriptions[0].id,
+    agb_version: LEGAL_VERSION,
+    widerruf_version: LEGAL_VERSION,
+    datenschutz_version: LEGAL_VERSION,
+    agb_akzeptiert: true,
+    sofortiger_beginn: body.sofortiger_beginn,
+  }]);
+
+  const confirmation = [
+    "Vertragsbestätigung – Löschmeier Föhr Jahreszugang",
+    "",
+    `Vertragsnummer: ${contractNumber}`,
+    `Tarif: ${tarife[0].bezeichnung}`,
+    `Preis: ${(tarife[0].preis_cent / 100).toFixed(2).replace(".", ",")} ${tarife[0].waehrung} je 12 Monate`,
+    `Vertragsschluss: ${now.toISOString()}`,
+    `Leistungsbeginn: ${performanceStart.toISOString()}`,
+    `Mindestlaufzeit bis: ${contractEnd.toISOString()}`,
+    "Danach verlängert sich der Vertrag auf unbestimmte Zeit. Die Vergütung von 12,00 EUR wird jeweils für zwölf Monate im Voraus berechnet. Ab Ende der Mindestlaufzeit kann jederzeit gekündigt werden; ungenutzte vorausbezahlte Restzeit wird anteilig erstattet.",
+    `Rechtstexte-Version: ${LEGAL_VERSION}`,
+    body.sofortiger_beginn
+      ? "Sie haben ausdrücklich verlangt, dass die Leistung vor Ablauf der Widerrufsfrist beginnt."
+      : "Die Leistung beginnt nach Ablauf der 14-tägigen Widerrufsfrist.",
+    "",
+    "Anbieter: Jörg Roeloffs, Scholkwai 86, 25938 Süderende, Telefon 01724149356, wasserentnahme-foehr@web.de",
+    "Leistung: Browserbasierte Föhr-Karte mit Wasserentnahmestellen und Defibrillatoren; Nutzung auf bis zu zwei registrierten Geräten.",
+    "Technische Voraussetzungen: aktueller Browser und Internetzugang; nach dem ersten Laden sind Teile der Anwendung offline nutzbar.",
+    "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
+    "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
+    "Kündigung: im Kundenbereich oder ohne Anmeldung unter https://test.roewise.com/kuendigen.html.",
+    "",
+    "Widerrufsbelehrung",
+    "Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie https://test.roewise.com/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.",
+    "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschmeier Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
+    "",
+    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag unbefristet weiter und kann jederzeit beendet werden; für ungenutzte vorausbezahlte Restzeit erfolgt eine anteilige Erstattung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
+    "Zusätzliche lesbare Fassung: https://test.roewise.com/agb.html",
+    "Datenschutz: https://test.roewise.com/datenschutz.html",
+  ].join("\n");
+  await nachrichtVormerken(db, env, {
+    customerId,
+    to: nutzer.email,
+    subject: `Vertragsbestätigung ${contractNumber}`,
+    text: confirmation,
+  });
+
+  return json({ status: "angelegt", vertragsnummer: contractNumber, leistungsbeginn_am: performanceStart.toISOString() });
 }
 
 // ---------- Kuendigung durch Kunden ----------
@@ -501,35 +1058,47 @@ async function kundeKuendigt(request, env) {
   if (!authUserId) return json({ fehler: "nicht_angemeldet" }, 401);
 
   const db = supabaseClient(env);
-  const profile = await db.select("customer_profiles", `auth_user_id=eq.${authUserId}&select=id`);
+  const profile = await db.select("customer_profiles", `auth_user_id=eq.${authUserId}&select=id,email`);
   if (profile.length === 0) return json({ fehler: "kein_profil" }, 404);
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${profile[0].id}&status=eq.aktiv&select=id,paypal_subscription_id,bezahlt_bis&limit=1`
+    `customer_id=eq.${profile[0].id}&status=in.(wird_geprueft,aktiv,kulanzzeit,wartet_auf_leistungsbeginn)&select=id,status,paypal_subscription_id,bezahlt_bis,mindestlaufzeit_bis,vertragsnummer,tariffs(bezeichnung)&limit=1`
   );
   if (abos.length === 0) return json({ fehler: "kein_aktives_abo" }, 404);
   const abo = abos[0];
 
-  const erfolgreich = await kuendigeAbo(env, abo.paypal_subscription_id, "Kuendigung durch Kunden im Kundenbereich");
-  if (!erfolgreich) return json({ fehler: "paypal_kuendigung_fehlgeschlagen" }, 502);
-
   const jetzt = new Date().toISOString();
-  await db.update("subscriptions", `id=eq.${abo.id}`, {
-    status: "gekuendigt_zum_ende",
-    gekuendigt_am: jetzt,
-    aktualisiert_am: jetzt,
-  });
+  const result = await kuendigungVerarbeiten(db, env, abo);
   await db.insert("cancellations", [
     {
       subscription_id: abo.id,
       angefordert_am: jetzt,
-      wirksam_zum: abo.bezahlt_bis || jetzt,
-      bestaetigungstext: `Kuendigung am ${jetzt} bestaetigt. Zugang bleibt bis ${abo.bezahlt_bis || "Ende des bezahlten Zeitraums"} bestehen.`,
+      wirksam_zum: result.effectiveAt,
+      bestaetigungstext: `Kündigung am ${jetzt} bestätigt. Vertragsende: ${result.effectiveAt}. Bearbeitungsstatus: ${result.processingStatus}.`,
     },
   ]);
 
-  return json({ status: "gekuendigt", wirksam_zum: abo.bezahlt_bis });
+  const confirmation = [
+    "Kündigungsbestätigung",
+    "",
+    `Vertragsnummer: ${abo.vertragsnummer || abo.paypal_subscription_id}`,
+    `Vertrag: ${abo.tariffs?.bezeichnung || "Löschmeier Föhr"}`,
+    `Eingegangen am: ${jetzt}`,
+    `Vertragsende: ${result.effectiveAt}`,
+    `Bearbeitungsstatus: ${result.processingStatus}`,
+    result.refundedCents > 0
+      ? `Anteilige Erstattung: ${(result.refundedCents / 100).toFixed(2).replace(".", ",")} EUR`
+      : null,
+  ].filter(Boolean).join("\n");
+  await nachrichtVormerken(db, env, {
+    customerId: profile[0].id,
+    to: profile[0].email,
+    subject: `Kündigungsbestätigung ${abo.vertragsnummer || ""}`.trim(),
+    text: confirmation,
+  });
+
+  return json({ status: "gekuendigt", wirksam_zum: result.effectiveAt, bestaetigung: confirmation });
 }
 
 // ---------- Geraet durch Kunden entfernen ----------
@@ -564,24 +1133,13 @@ async function kundeEntferntGeraet(request, env) {
 // im Format JAHR-NNNN (z.B. 2026-0001), wie mit dem Betreiber festgelegt.
 
 async function erstelleRechnung(db, subscriptionId, paymentId, betragCent) {
-  const jahr = new Date().getFullYear();
-  const bestehende = await db.select(
-    "invoices",
-    `rechnungsnummer=like.${jahr}-*&select=rechnungsnummer&order=rechnungsnummer.desc&limit=1`
-  );
-
-  let naechsteLaufnummer = 1;
-  if (bestehende.length > 0) {
-    const teile = bestehende[0].rechnungsnummer.split("-");
-    naechsteLaufnummer = parseInt(teile[1], 10) + 1;
-  }
-  const rechnungsnummer = `${jahr}-${String(naechsteLaufnummer).padStart(4, "0")}`;
+  const rechnungsnummer = await db.rpc("next_invoice_number");
 
   await db.insert("invoices", [
     {
       subscription_id: subscriptionId,
       payment_id: paymentId,
-      rechnungsnummer,
+      rechnungsnummer: typeof rechnungsnummer === "string" ? rechnungsnummer : String(rechnungsnummer),
       betrag_cent: betragCent,
     },
   ]);
@@ -593,7 +1151,7 @@ async function taeglicherAbgleich(env) {
   const db = supabaseClient(env);
   const abos = await db.select(
     "subscriptions",
-    `status=in.(aktiv,kulanzzeit,ueberfaellig)&select=id,paypal_subscription_id,status`
+    `status=in.(wird_geprueft,aktiv,kulanzzeit,ueberfaellig,wartet_auf_leistungsbeginn)&select=id,paypal_subscription_id,status,sofortiger_beginn,leistungsbeginn_am`
   );
 
   for (const abo of abos) {
@@ -603,7 +1161,10 @@ async function taeglicherAbgleich(env) {
       const paypalStatus = (details.status || "").toUpperCase();
 
       let neuerStatus = null;
-      if (paypalStatus === "ACTIVE") neuerStatus = "aktiv";
+      if (paypalStatus === "ACTIVE") {
+        const darfStarten = abo.sofortiger_beginn || (abo.leistungsbeginn_am && new Date(abo.leistungsbeginn_am) <= new Date());
+        neuerStatus = darfStarten ? "aktiv" : "wartet_auf_leistungsbeginn";
+      }
       else if (paypalStatus === "SUSPENDED") neuerStatus = "gesperrt";
       else if (paypalStatus === "CANCELLED") neuerStatus = "gekuendigt_zum_ende";
       else if (paypalStatus === "EXPIRED") neuerStatus = "abgelaufen";
@@ -710,10 +1271,12 @@ async function adminAnfrage(request, env, url) {
 async function adminUebersicht(db) {
   const alle = await db.select("subscriptions", "select=status,tariffs(preis_cent)");
   const zaehler = {};
-  let monatsUmsatzCent = 0;
+  let gebuchtesVolumenCent = 0;
   for (const s of alle) {
     zaehler[s.status] = (zaehler[s.status] || 0) + 1;
-    if (s.status === "aktiv") monatsUmsatzCent += s.tariffs?.preis_cent || 0;
+    if (["aktiv", "wartet_auf_leistungsbeginn"].includes(s.status)) {
+      gebuchtesVolumenCent += s.tariffs?.preis_cent || 0;
+    }
   }
   const fehlerhafteWebhooks = await db.select(
     "webhook_events",
@@ -722,7 +1285,7 @@ async function adminUebersicht(db) {
   return {
     gesamtKunden: alle.length,
     proStatus: zaehler,
-    monatsUmsatzCent,
+    gebuchtesVolumenCent,
     webhookFehlerAnzahl: fehlerhafteWebhooks.length,
   };
 }

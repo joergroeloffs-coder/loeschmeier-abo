@@ -136,7 +136,7 @@
       { zahl: uebersicht.proStatus.ueberfaellig || 0, label: "Überfällig" },
       { zahl: uebersicht.proStatus.kulanzzeit || 0, label: "In Kulanzzeit" },
       { zahl: uebersicht.proStatus.gesperrt || 0, label: "Gesperrt" },
-      { zahl: (uebersicht.monatsUmsatzCent / 100).toFixed(2) + " €", label: "Monatsumsatz (aktiv)" },
+      { zahl: (uebersicht.gebuchtesVolumenCent / 100).toFixed(2) + " €", label: "Gebuchtes Volumen (aktiv)" },
       { zahl: uebersicht.webhookFehlerAnzahl, label: "Webhook-Fehler" },
     ];
     document.getElementById("kacheln").innerHTML = kacheln.map(k =>

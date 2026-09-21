@@ -9,12 +9,17 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 PAYPAL_CLIENT_ID = "AVbDi3EuNbQry_liS-9_07-8tD73Zh11vmJwOoCL_7JTmNMqwCY0tHtSxFqqEzmGK9g82OKqfhaOHUR7"
 PAYPAL_API_BASE = "https://api-m.sandbox.paypal.com"
 KULANZ_TAGE = "3"
+SALES_ENABLED = "false"
+TRANSACTIONAL_FROM = "Roewise <noreply@roewise.com>"
 
 # Geheime Werte NICHT hier eintragen. Stattdessen im Cloudflare-Dashboard:
 # Worker -> Settings -> Variables and Secrets -> "Add" -> Typ "Secret":
 #   SUPABASE_SERVICE_ROLE_KEY   (Supabase -> Project Settings -> API -> service_role)
 #   PAYPAL_SECRET               (PayPal Developer -> App -> Secret)
 #   PAYPAL_WEBHOOK_ID           (wird bei der Webhook-Einrichtung vergeben, s. unten)
+#   RESEND_API_KEY              (Resend -> API Keys)
+# SALES_ENABLED erst nach Migration, Jahresplan, Webhook- und E-Mail-Test auf
+# "true" stellen. Bis dahin zeigt die Seite das Angebot ohne Kaufmöglichkeit.
 
 # Taeglicher Abgleich mit PayPal (faengt ausgefallene Webhooks ab)
 [triggers]

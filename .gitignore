@@ -1,1 +1,3 @@
 setup/paypal_zugangsdaten.json
+__pycache__/
+*.py[cod]

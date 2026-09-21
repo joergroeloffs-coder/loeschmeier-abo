@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Legt einmalig ein PayPal-Abo-Produkt + Preisplan in der Sandbox an
-("Löschmeier Test", 1 EUR/Monat). Läuft lokal bei dir - dein PayPal-Secret
+Legt einmalig ein PayPal-Produkt + einen jährlich wiederkehrenden Preisplan
+in der Sandbox an ("Löschmeier Föhr", 12 EUR/Jahr). Läuft lokal bei dir - dein PayPal-Secret
 bleibt auf deinem Rechner und wird nirgendwo hochgeladen.
 
 Vorbereitung:
@@ -77,8 +77,8 @@ def main():
         "/v1/catalogs/products",
         methode="POST",
         body={
-            "name": "Löschmeier Test",
-            "description": "Digitale Wasserentnahmestellen-Karte (Testversion)",
+            "name": "Löschmeier Föhr",
+            "description": "Digitale Wasserentnahmestellen- und Defibrillatorenkarte für Föhr",
             "type": "SERVICE",
             "category": "SOFTWARE",
         },
@@ -87,22 +87,22 @@ def main():
     produkt_id = produkt["id"]
     print(f"  Produkt-ID: {produkt_id}")
 
-    print("Lege Preisplan an (1 EUR / Monat) ...")
+    print("Lege Preisplan an (12 EUR / Jahr, automatische Verlängerung) ...")
     plan = anfrage(
         "/v1/billing/plans",
         methode="POST",
         body={
             "product_id": produkt_id,
-            "name": "Löschmeier Test – Monatsabo",
-            "description": "1 EUR pro Monat, jederzeit kuendbar",
+            "name": "Löschmeier Föhr – Jahreszugang",
+            "description": "12 EUR pro Jahr; nach der Mindestlaufzeit monatlich kuendbar",
             "billing_cycles": [
                 {
-                    "frequency": {"interval_unit": "MONTH", "interval_count": 1},
+                    "frequency": {"interval_unit": "YEAR", "interval_count": 1},
                     "tenure_type": "REGULAR",
                     "sequence": 1,
                     "total_cycles": 0,
                     "pricing_scheme": {
-                        "fixed_price": {"value": "1.00", "currency_code": "EUR"}
+                        "fixed_price": {"value": "12.00", "currency_code": "EUR"}
                     },
                 }
             ],
