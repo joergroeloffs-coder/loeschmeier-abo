@@ -100,6 +100,38 @@ Geprüft im Browser (`test/browser/testkopie-zugriff.test.js`): Ein gesetzter
 Testkopie nicht mehr; ohne Anmeldung bleibt sie gesperrt; mit gültigem Abo
 lädt sie normal.
 
+
+### 2.2 Nachtrag: Datenpflege-Werkzeug war weiterhin offen
+
+Beim ersten Aufruf nach der Veröffentlichung fiel auf, dass
+`app/verwaltung.html` – das Werkzeug zum Pflegen der Stellendaten – **ohne
+jede Anmeldung erreichbar** war. In `wasserentnahme-foehr` hatte ich die
+entsprechende Seite geschützt, die Entsprechung in diesem Repository aber
+übersehen. Die Seite war damit unter `test.roewise.com/verwaltung` öffentlich.
+
+Behoben:
+
+- `verwaltung.html` und `nutzer-admin/` verlangen jetzt ein vom Server
+  bestätigtes Betreiberkonto.
+- Die Schutzstufe steht als Attribut am Skript-Tag
+  (`data-betreiber="ja"`), statt in der gemeinsamen Datei verdrahtet zu sein.
+  So ist je Seite sichtbar, was gilt.
+- Die Service Worker dieses Repositories hatten dieselben Mängel wie die in
+  `wasserentnahme-foehr`: Die Stellendaten lagen im dauerhaften
+  Zwischenspeicher und der Zugangsschutz fehlte in der Dateiliste. Beides
+  korrigiert, Zwischenspeicherversionen erhöht.
+
+Neuer Test `test/browser/interne-seiten.test.js` prüft jede Seite einzeln:
+Datenpflege und `nutzer-admin/` sind ohne Anmeldung und für angemeldete
+Kunden ohne Betreiberrecht gesperrt, für Betreiberkonten frei; die
+Nutzerversion verlangt ein Abo, aber kein Betreiberrecht; Kündigung,
+Widerruf, AGB, Impressum und Registrierung bleiben ohne Anmeldung
+erreichbar.
+
+**Lehre daraus:** Ich hatte die Seiten in Repository 3 geprüft und
+angenommen, die Kopie hier sei gleich aufgebaut. Der vollständige
+Seitendurchlauf, der den Fehler zeigte, steht jetzt als Test im Repository.
+
 ## 3. Zwei Befunde, die eine Entscheidung des Betriebs brauchen
 
 ### 3.1 Die Repositories sind öffentlich

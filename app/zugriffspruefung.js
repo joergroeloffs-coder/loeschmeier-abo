@@ -17,6 +17,10 @@
 (function () {
   "use strict";
 
+  // Die Seite legt ueber data-betreiber="ja" fest, ob ein Betreiberkonto
+  // verlangt wird. Ohne Angabe genuegt ein aktiver Jahreszugang.
+  const EIGENES_SKRIPT = document.currentScript;
+
   const BIBLIOTHEK = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
 
   const TEXTE = {
@@ -220,5 +224,8 @@
 
   // In dieser Fassung der App wird die Prüfung direkt beim Laden gestartet:
   // Die Seiten binden nur diese Datei ein und rufen nichts weiter auf.
-  starten({ betreiberErforderlich: false });
+  starten({
+    betreiberErforderlich:
+      EIGENES_SKRIPT && EIGENES_SKRIPT.dataset.betreiber === "ja",
+  });
 })();
