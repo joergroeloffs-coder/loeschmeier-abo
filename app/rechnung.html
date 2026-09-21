@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rechnung – Löschmeier Test</title>
+<title>Rechnung – Löschbärt Test</title>
 <style>
   :root{--bg:#0d1116;--text:#e6edf3;--muted:#93a3b3;--signal:#2fa4ff;--border:#2a313c}
   body{
@@ -59,7 +59,7 @@
   <p style="font-size:13px;color:#555">Rechnungsempfänger: <span id="r-email"></span></p>
 
   <div class="zeile"><span>Position</span><span>Betrag</span></div>
-  <div class="zeile"><span id="r-tarif">Löschmeier – Abo</span><span id="r-betrag"></span></div>
+  <div class="zeile"><span id="r-tarif">Löschbärt – Abo</span><span id="r-betrag"></span></div>
   <div class="zeile summe"><span>Gesamt</span><span id="r-gesamt"></span></div>
 
   <p class="hinweis" id="r-ust-hinweis">
@@ -105,7 +105,7 @@
     document.getElementById("r-nummer").textContent = r.rechnungsnummer;
     document.getElementById("r-datum").textContent = formatDatum(r.ausgestellt_am);
     document.getElementById("r-email").textContent = r.subscriptions?.customer_profiles?.email || "";
-    document.getElementById("r-tarif").textContent = r.subscriptions?.tariffs?.bezeichnung || "Löschmeier – Abo";
+    document.getElementById("r-tarif").textContent = r.subscriptions?.tariffs?.bezeichnung || "Löschbärt – Abo";
     document.getElementById("r-betrag").textContent = formatBetrag(r.betrag_cent);
     document.getElementById("r-gesamt").textContent = formatBetrag(r.betrag_cent);
 

@@ -1,6 +1,6 @@
 {
-  "name": "Löschmeier Test",
-  "short_name": "Löschmeier Test",
+  "name": "Löschbärt Test",
+  "short_name": "Löschbärt Test",
   "start_url": "./verwaltung.html",
   "scope": "./",
   "display": "standalone",

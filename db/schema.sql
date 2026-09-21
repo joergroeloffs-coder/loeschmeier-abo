@@ -1,4 +1,4 @@
--- Löschmeier Test — Datenmodell (Supabase/Postgres)
+-- Löschbärt Test — Datenmodell (Supabase/Postgres)
 -- Wird im Supabase SQL-Editor einmalig ausgeführt, nachdem das Projekt
 -- angelegt ist. auth.users wird automatisch von Supabase Auth verwaltet
 -- (E-Mail-Link-Login) und hier nur referenziert.
@@ -221,4 +221,4 @@ create policy "eigene_kuendigungen" on cancellations
 
 -- ---------- Start-Tarif ----------
 insert into tariffs (code, bezeichnung, preis_cent, intervall)
-values ('monat', 'Löschmeier Test – Monatsabo', 100, 'monatlich');
+values ('monat', 'Löschbärt Test – Monatsabo', 100, 'monatlich');

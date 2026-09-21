@@ -35,7 +35,7 @@ test("validiert eine ordentliche Kündigung", () => {
     name: "Max Muster",
     email: "MAX@example.de",
     vertragsreferenz: "LM-2026-ABC",
-    vertragsbezeichnung: "Löschmeier Föhr – Jahresabo",
+    vertragsbezeichnung: "Löschbärt Föhr – Jahresabo",
     erklaerungsart: "ordentlich",
   }, "kuendigung");
   assert.equal(result.ok, true);
@@ -56,7 +56,7 @@ test("lehnt ein ungueltiges Wunschdatum ab", () => {
     name: "Erika Muster",
     email: "erika@example.test",
     vertragsreferenz: "LM-2026-123",
-    vertragsbezeichnung: "Löschmeier Föhr – Jahresabo",
+    vertragsbezeichnung: "Löschbärt Föhr – Jahresabo",
     erklaerungsart: "ordentlich",
     gewuenschtes_ende: "kein-datum",
   }, "kuendigung");
@@ -80,7 +80,7 @@ test("Bestätigung enthält Eingangszeit und Referenz", () => {
       name: "Max Muster",
       email: "max@example.de",
       contractReference: "LM-2026-ABC",
-      contractLabel: "Löschmeier Föhr – Jahresabo",
+      contractLabel: "Löschbärt Föhr – Jahresabo",
     },
   });
   assert.match(text, /Widerruf/);

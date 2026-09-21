@@ -1,6 +1,6 @@
 {
-  "name": "Löschmeier Test (Admin)",
-  "short_name": "Löschmeier Test Admin",
+  "name": "Löschbärt Test (Admin)",
+  "short_name": "Löschbärt Test Admin",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -17,7 +17,7 @@ export function validatePublicDeclaration(body, type) {
   const name = cleanText(body.name, 160);
   const email = normalizeEmail(body.email);
   const contractReference = cleanText(body.vertragsreferenz, 160);
-  const contractLabel = cleanText(body.vertragsbezeichnung || "Löschmeier Föhr – Jahreszugang", 200);
+  const contractLabel = cleanText(body.vertragsbezeichnung || "Löschbärt Föhr – Jahreszugang", 200);
   if (!name || !isValidEmail(email) || !contractReference || !contractLabel) {
     return { ok: false, error: "ungueltige_oder_fehlende_angaben" };
   }

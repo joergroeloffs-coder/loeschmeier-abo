@@ -1,4 +1,4 @@
-// Löschmeier Test — Cloudflare Worker (zusammengefasste Datei für den
+// Löschbärt Test — Cloudflare Worker (zusammengefasste Datei für den
 // Dashboard-Code-Editor). Quelle/Wartung in worker/src/*.js — diese Datei
 // wird daraus automatisch zusammengesetzt (build_bundle.py), bitte nicht
 // direkt bearbeiten.
@@ -192,7 +192,7 @@ function validatePublicDeclaration(body, type) {
   const name = cleanText(body.name, 160);
   const email = normalizeEmail(body.email);
   const contractReference = cleanText(body.vertragsreferenz, 160);
-  const contractLabel = cleanText(body.vertragsbezeichnung || "Löschmeier Föhr – Jahreszugang", 200);
+  const contractLabel = cleanText(body.vertragsbezeichnung || "Löschbärt Föhr – Jahreszugang", 200);
   if (!name || !isValidEmail(email) || !contractReference || !contractLabel) {
     return { ok: false, error: "ungueltige_oder_fehlende_angaben" };
   }
@@ -1010,7 +1010,7 @@ async function aboAnlegen(request, env) {
   }]);
 
   const confirmation = [
-    "Vertragsbestätigung – Löschmeier Föhr Jahreszugang",
+    "Vertragsbestätigung – Löschbärt Föhr Jahreszugang",
     "",
     `Vertragsnummer: ${contractNumber}`,
     `Tarif: ${tarife[0].bezeichnung}`,
@@ -1033,7 +1033,7 @@ async function aboAnlegen(request, env) {
     "",
     "Widerrufsbelehrung",
     "Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie https://test.roewise.com/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.",
-    "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschmeier Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
+    "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschbärt Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
     "",
     `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag unbefristet weiter und kann jederzeit beendet werden; für ungenutzte vorausbezahlte Restzeit erfolgt eine anteilige Erstattung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
     "Zusätzliche lesbare Fassung: https://test.roewise.com/agb.html",
@@ -1083,7 +1083,7 @@ async function kundeKuendigt(request, env) {
     "Kündigungsbestätigung",
     "",
     `Vertragsnummer: ${abo.vertragsnummer || abo.paypal_subscription_id}`,
-    `Vertrag: ${abo.tariffs?.bezeichnung || "Löschmeier Föhr"}`,
+    `Vertrag: ${abo.tariffs?.bezeichnung || "Löschbärt Föhr"}`,
     `Eingegangen am: ${jetzt}`,
     `Vertragsende: ${result.effectiveAt}`,
     `Bearbeitungsstatus: ${result.processingStatus}`,

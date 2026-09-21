@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Legt einmalig ein PayPal-Produkt + einen jährlich wiederkehrenden Preisplan
-in der Sandbox an ("Löschmeier Föhr", 12 EUR/Jahr). Läuft lokal bei dir - dein PayPal-Secret
+in der Sandbox an ("Löschbärt Föhr", 12 EUR/Jahr). Läuft lokal bei dir - dein PayPal-Secret
 bleibt auf deinem Rechner und wird nirgendwo hochgeladen.
 
 Vorbereitung:
@@ -77,7 +77,7 @@ def main():
         "/v1/catalogs/products",
         methode="POST",
         body={
-            "name": "Löschmeier Föhr",
+            "name": "Löschbärt Föhr",
             "description": "Digitale Wasserentnahmestellen- und Defibrillatorenkarte für Föhr",
             "type": "SERVICE",
             "category": "SOFTWARE",
@@ -93,7 +93,7 @@ def main():
         methode="POST",
         body={
             "product_id": produkt_id,
-            "name": "Löschmeier Föhr – Jahreszugang",
+            "name": "Löschbärt Föhr – Jahreszugang",
             "description": "12 EUR pro Jahr; nach der Mindestlaufzeit monatlich kuendbar",
             "billing_cycles": [
                 {

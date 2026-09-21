@@ -26,7 +26,7 @@ paypal = open(SRC + "paypal.js").read()
 legal = open(SRC + "legal.js").read()
 index = open(SRC + "index.js").read()
 
-header = """// Löschmeier Test — Cloudflare Worker (zusammengefasste Datei für den
+header = """// Löschbärt Test — Cloudflare Worker (zusammengefasste Datei für den
 // Dashboard-Code-Editor). Quelle/Wartung in worker/src/*.js — diese Datei
 // wird daraus automatisch zusammengesetzt (build_bundle.py), bitte nicht
 // direkt bearbeiten.

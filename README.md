@@ -1,4 +1,4 @@
-# Löschmeier Föhr – Verkaufsplattform
+# Löschbärt Föhr – Verkaufsplattform
 
 Verkaufs-, Vertrags- und Zugangsverwaltung für den privaten Föhr-Jahreszugang.
 Der Zugang kostet 12 Euro pro Jahr und ist auf zwei Geräte begrenzt. Nach zwölf
