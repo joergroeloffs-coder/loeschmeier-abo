@@ -680,9 +680,20 @@ async function entscheideZugriff(request, env) {
     return { erlaubt: false, grund: "fehlende_angaben", status: 400 };
   }
 
-  const authUserId = await pruefeNutzerToken(env, accessToken);
-  if (!authUserId) {
+  // Der Nutzer wird ueber sein Token identifiziert; die Betreibereigenschaft
+  // entscheidet ausschliesslich der Server anhand einer Liste im Worker.
+  const nutzer = await holeNutzer(env, accessToken);
+  if (!nutzer) {
     return { erlaubt: false, grund: "nicht_angemeldet", status: 401 };
+  }
+  const authUserId = nutzer.id;
+  const betreiber = istBetreiber(env, nutzer.email);
+
+  // Der Betrieb selbst hat kein Kundenabo. Betreiberkonten werden deshalb
+  // unabhaengig vom Vertragsstatus freigegeben - die Berechtigung kommt
+  // allein aus der serverseitigen Liste, nicht aus dem Browser.
+  if (betreiber) {
+    return { erlaubt: true, status: "betreiber", betreiber: true, maxGeraete: null };
   }
 
   const db = supabaseClient(env);
@@ -691,7 +702,7 @@ async function entscheideZugriff(request, env) {
     "customer_profiles",
     `auth_user_id=eq.${filterWert(authUserId)}&select=id`
   );
-  if (profile.length === 0) return { erlaubt: false, grund: "kein_profil" };
+  if (profile.length === 0) return { erlaubt: false, grund: "kein_profil", betreiber };
   const customerId = profile[0].id;
 
   const abos = await db.select(
@@ -735,7 +746,23 @@ async function entscheideZugriff(request, env) {
     });
   }
 
-  return { erlaubt: true, status: abo.status, maxGeraete, bezahltBis: abo.bezahlt_bis };
+  return {
+    erlaubt: true,
+    status: abo.status,
+    maxGeraete,
+    bezahltBis: abo.bezahlt_bis,
+    betreiber,
+  };
+}
+
+// Betreiberkonten fuer die internen Bereiche (Datenpflege, nutzer-admin).
+// Die Liste steht nur im Worker, nie im Browsercode.
+function istBetreiber(env, email) {
+  const erlaubte = String(env.BETREIBER_AUTH_EMAILS || "")
+    .split(",")
+    .map((eintrag) => eintrag.trim().toLowerCase())
+    .filter(Boolean);
+  return erlaubte.includes(String(email || "").trim().toLowerCase());
 }
 
 async function pruefeZugriff(request, env) {

@@ -20,6 +20,12 @@ OEFFENTLICHE_BASIS_URL = "https://test.roewise.com"
 # Widerrufe, besonders die Faelle mit "manuell_pruefen").
 BETREIBER_EMAIL = "wasserentnahme-foehr@web.de"
 
+# Konten mit Zugang zu den internen Bereichen (Datenpflege, nutzer-admin).
+# Kommagetrennte Anmelde-E-Mail-Adressen. MUSS gesetzt sein, bevor die
+# geschuetzten Seiten veroeffentlicht werden - sonst sperrt sich der Betrieb
+# aus den eigenen Werkzeugen aus.
+BETREIBER_AUTH_EMAILS = ""
+
 # Zusaetzlich erlaubte Aufrufer (CORS), kommagetrennt. Die eigenen Domains
 # stehen bereits fest im Worker-Code.
 ERLAUBTE_URSPRUENGE = ""
