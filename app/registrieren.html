@@ -154,6 +154,46 @@
         border-radius: 8px;
         font-weight: 700;
       }
+      /* Bestelluebersicht: alle Pflichtangaben direkt vor dem Bestellbutton,
+         deutlich abgesetzt vom uebrigen Text. */
+      .uebersicht {
+        margin: 18px 0;
+        padding: 16px;
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        background: #0b1620;
+      }
+      .uebersicht dt {
+        margin-top: 12px;
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .uebersicht dt:first-child {
+        margin-top: 0;
+      }
+      .uebersicht dd {
+        margin: 3px 0 0;
+      }
+      .wahl {
+        margin: 16px 0 0;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .wahl legend {
+        padding: 0 6px;
+        font-weight: 700;
+      }
+      .wahl .choice {
+        margin-top: 8px;
+      }
+      :focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>
@@ -197,40 +237,97 @@
       <section class="card" id="order-card" hidden>
         <h2>2. Bestellung prüfen</h2>
         <p id="signed-in"></p>
-        <p>
-          <strong>Löschbärt Föhr – Jahreszugang</strong><br />Preis: 12,00 € je
-          12 Monate · Mindestlaufzeit: 12 Monate ab Leistungsbeginn · danach
-          unbefristete Verlängerung mit jährlicher Vorauszahlung und
-          jederzeitiger Kündigung · bis zu 2 Geräte
-        </p>
+
+        <dl class="uebersicht">
+          <dt>Leistung</dt>
+          <dd>
+            Löschbärt Föhr – Jahreszugang: browserbasierte Karte der
+            Wasserentnahmestellen und Defibrillatoren auf Föhr
+          </dd>
+          <dt>Gesamtpreis</dt>
+          <dd>
+            <strong>12,00 Euro</strong> je zwölf Monate, im Voraus zu zahlen.
+            Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen. Weitere
+            Preisbestandteile fallen nicht an.
+          </dd>
+          <dt>Zahlungsweise</dt>
+          <dd>PayPal (Abbuchung im Voraus für jeweils zwölf Monate)</dd>
+          <dt>Laufzeit und Verlängerung</dt>
+          <dd>
+            Zwölf Monate Mindestlaufzeit ab Leistungsbeginn. Danach läuft der
+            Vertrag unbefristet weiter; die Vergütung wird jeweils für zwölf
+            Monate im Voraus berechnet.
+          </dd>
+          <dt>Kündigung</dt>
+          <dd>
+            Ab Ende der Mindestlaufzeit jederzeit kündbar, ohne Frist, über den
+            Kundenbereich oder öffentlich unter
+            <a href="/kuendigen.html">„Verträge hier kündigen“</a>. Bereits
+            vorausbezahlte, nicht genutzte Restzeit wird anteilig erstattet.
+          </dd>
+          <dt>Geräte</dt>
+          <dd>Nutzung auf bis zu zwei registrierten Geräten gleichzeitig</dd>
+          <dt>Voraussetzungen</dt>
+          <dd>Aktueller Browser und Internetzugang</dd>
+          <dt>Anbieter</dt>
+          <dd>
+            Jörg Roeloffs, Scholkwai 86, 25938 Süderende ·
+            <a href="/impressum.html">Impressum</a>
+          </dd>
+          <dt>Unterlagen</dt>
+          <dd>
+            <a href="/agb.html" target="_blank" rel="noopener">AGB</a> ·
+            <a href="/widerruf.html" target="_blank" rel="noopener"
+              >Widerrufsbelehrung</a
+            >
+            ·
+            <a href="/datenschutz.html" target="_blank" rel="noopener"
+              >Datenschutzerklärung</a
+            >
+          </dd>
+        </dl>
+
         <label class="choice"
           ><input id="terms" type="checkbox" /><span
-            >Ich akzeptiere die <a href="/agb.html" target="_blank">AGB</a> und
+            >Ich akzeptiere die <a href="/agb.html" target="_blank" rel="noopener">AGB</a> und
             habe die
-            <a href="/widerruf.html" target="_blank">Widerrufsbelehrung</a>
+            <a href="/widerruf.html" target="_blank" rel="noopener">Widerrufsbelehrung</a>
             sowie die
-            <a href="/datenschutz.html" target="_blank">Datenschutzerklärung</a>
+            <a href="/datenschutz.html" target="_blank" rel="noopener">Datenschutzerklärung</a>
             gelesen.</span
           ></label
-        ><label class="choice"
-          ><input type="radio" name="start" value="later" checked /><span
-            >Leistungsbeginn nach Ablauf der 14-tägigen Widerrufsfrist.</span
-          ></label
-        ><label class="choice"
-          ><input type="radio" name="start" value="now" /><span
-            >Ich verlange ausdrücklich, dass die Dienstleistung vor Ablauf der
-            Widerrufsfrist beginnt. Mir ist bekannt, dass bei Widerruf
-            Wertersatz für die bis dahin erbrachte Leistung verlangt werden
-            kann.</span
-          ></label
         >
-        <p class="muted">
-          Mit dem PayPal-Button „Bezahlen“ geben Sie eine zahlungspflichtige
-          Bestellung über zunächst 12,00 € ab. Danach werden bis zur Kündigung
-          jeweils 12,00 € pro Jahr im Voraus berechnet.
+
+        <fieldset class="wahl">
+          <legend>Wann soll die Leistung beginnen?</legend>
+          <label class="choice"
+            ><input type="radio" name="start" value="later" /><span
+              >Erst nach Ablauf der 14-tägigen Widerrufsfrist.</span
+            ></label
+          ><label class="choice"
+            ><input type="radio" name="start" value="now" /><span
+              >Ich verlange ausdrücklich, dass die Dienstleistung vor Ablauf der
+              Widerrufsfrist beginnt. Mir ist bekannt, dass bei Widerruf
+              Wertersatz für die bis dahin erbrachte Leistung verlangt werden
+              kann.</span
+            ></label
+          >
+        </fieldset>
+
+        <button class="btn" id="bestellen" type="button">
+          Zahlungspflichtig abonnieren
+        </button>
+        <p class="muted" id="bestellhinweis">
+          Mit dieser Schaltfläche geben Sie eine zahlungspflichtige Bestellung
+          über 12,00 Euro je zwölf Monate ab. Im nächsten Schritt bestätigen Sie
+          die Zahlung bei PayPal.
         </p>
-        <div id="paypal-button-container" style="margin-top: 18px"></div>
-        <div class="status" id="order-status" role="status"></div>
+
+        <div id="zahlschritt" hidden>
+          <h3>3. Zahlung bei PayPal bestätigen</h3>
+          <div id="paypal-button-container" style="margin-top: 12px"></div>
+        </div>
+        <div class="status" id="order-status" role="status" aria-live="polite"></div>
         <p id="after-order" hidden>
           <a href="https://foehr.roewise.com/nutzer/">Löschbärt Föhr öffnen</a>
           · <a href="/kundenbereich.html">Kundenbereich öffnen</a>
@@ -254,6 +351,18 @@
           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g",
         WORKER_URL =
           "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
+            // Ohne die Anmeldebibliothek kann die Seite nichts tun. Statt eines
+      // stummen Skriptabbruchs erscheint dann ein verständlicher Hinweis.
+      if (!window.supabase || !window.supabase.createClient) {
+        document.body.insertAdjacentHTML(
+          "afterbegin",
+          '<p style="margin:16px;padding:14px;border:1px solid #ff7b72;border-radius:8px;color:#ff7b72">' +
+            "Die Anmeldung kann gerade nicht geladen werden. Bitte die Seite neu laden. " +
+            "Besteht das Problem weiter, wenden Sie sich bitte an wasserentnahme-foehr@web.de." +
+            "</p>"
+        );
+        throw new Error("Anmeldebibliothek nicht verfuegbar");
+      }
       const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       let catalog = null,
         tariff = null,
@@ -302,6 +411,40 @@
           error ? "error" : "success",
         );
       };
+      // Die verbindliche Bestellung wird mit der eigenen Schaltflaeche
+      // "Zahlungspflichtig abonnieren" abgegeben (§ 312j Abs. 3 BGB). PayPal
+      // dient danach nur noch der Zahlung.
+      document.getElementById("bestellen").onclick = async () => {
+        if (!catalog?.verkaufAktiv || !tariff?.kaufbar) {
+          return status(
+            "order-status",
+            "Der Verkauf ist derzeit nicht freigeschaltet.",
+            "error",
+          );
+        }
+        if (!document.getElementById("terms").checked) {
+          return status(
+            "order-status",
+            "Bitte zuerst AGB, Widerrufsbelehrung und Datenschutzerklärung bestätigen.",
+            "error",
+          );
+        }
+        if (!document.querySelector('input[name="start"]:checked')) {
+          return status(
+            "order-status",
+            "Bitte wählen, wann die Leistung beginnen soll.",
+            "error",
+          );
+        }
+        document.getElementById("zahlschritt").hidden = false;
+        status(
+          "order-status",
+          "Bestellung erfasst. Bitte zum Abschluss die Zahlung bei PayPal bestätigen.",
+        );
+        await renderPaypal();
+        document.getElementById("zahlschritt").scrollIntoView({ block: "nearest" });
+      };
+
       async function renderPaypal() {
         if (
           paypalRendered ||
@@ -311,13 +454,25 @@
         )
           return;
         paypalRendered = true;
-        const script = document.createElement("script");
-        script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(catalog.paypalClientId)}&vault=true&intent=subscription&currency=EUR`;
-        document.body.appendChild(script);
-        await new Promise((resolve, reject) => {
-          script.onload = resolve;
-          script.onerror = reject;
-        });
+        if (!window.paypal) {
+          const script = document.createElement("script");
+          script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(catalog.paypalClientId)}&vault=true&intent=subscription&currency=EUR`;
+          document.body.appendChild(script);
+          try {
+            await new Promise((resolve, reject) => {
+              script.onload = resolve;
+              script.onerror = reject;
+            });
+          } catch {
+            // Ohne PayPal-SDK darf die Seite nicht stumm stehen bleiben.
+            paypalRendered = false;
+            return status(
+              "order-status",
+              "PayPal konnte nicht geladen werden. Es wurde nichts bestellt und nichts bezahlt. Bitte die Seite neu laden.",
+              "error",
+            );
+          }
+        }
         paypal
           .Buttons({
             style: {
@@ -327,10 +482,15 @@
               label: "pay",
             },
             onClick(data, actions) {
-              if (!document.getElementById("terms").checked) {
+              // Zweite Absicherung: ohne Zustimmung und ohne Wahl des
+              // Leistungsbeginns wird auch bei PayPal nichts ausgeloest.
+              if (
+                !document.getElementById("terms").checked ||
+                !document.querySelector('input[name="start"]:checked')
+              ) {
                 status(
                   "order-status",
-                  "Bitte zuerst den Rechtstexten zustimmen.",
+                  "Bitte zuerst den Rechtstexten zustimmen und den Leistungsbeginn wählen.",
                   "error",
                 );
                 return actions.reject();
@@ -433,19 +593,20 @@
           "Angemeldet als " + session.user.email;
         await loadCatalog();
         if (await hasExistingAccess(session)) {
+          // Kein zweiter Vertrag auf dasselbe Konto: Bestellteil komplett aus.
           document.getElementById("terms").closest("label").hidden = true;
-          document
-            .querySelectorAll('input[name="start"]')
-            .forEach((input) => (input.closest("label").hidden = true));
+          document.querySelector(".wahl").hidden = true;
+          document.querySelector(".uebersicht").hidden = true;
+          document.getElementById("bestellen").hidden = true;
+          document.getElementById("bestellhinweis").hidden = true;
+          document.getElementById("zahlschritt").hidden = true;
           status(
             "order-status",
             "Für dieses Konto besteht bereits ein Jahreszugang. Es wird keine weitere Zahlung angeboten.",
             "success",
           );
           document.getElementById("after-order").hidden = false;
-          return;
         }
-        await renderPaypal();
       }
       document.getElementById("logout").onclick = async () => {
         await sb.auth.signOut();

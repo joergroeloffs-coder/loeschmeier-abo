@@ -217,9 +217,11 @@ function validatePublicDeclaration(body, type) {
   };
 }
 
+// LB = Löschbärt. Die Nummer steht in Bestätigungen und auf Rechnungen und
+// ist damit für Kundinnen und Kunden sichtbar.
 function createContractNumber(now = new Date(), random = crypto.randomUUID()) {
   const year = now.getUTCFullYear();
-  return `LM-${year}-${String(random).replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+  return `LB-${year}-${String(random).replace(/-/g, "").slice(0, 10).toUpperCase()}`;
 }
 
 function calculateProRataRefund({ amountCents, periodStart, periodEnd, effectiveAt }) {
@@ -278,23 +280,71 @@ function declarationConfirmation({ type, receiptId, receivedAt, data, effectiveA
 
 // ===== index.js =====
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Passwort",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-};
+// Nur die eigenen Seiten duerfen den Worker aus einem Browser heraus
+// aufrufen. Eine fremde Webseite kann damit keine Anfragen im Namen eines
+// angemeldeten Kunden stellen. Weitere Adressen (z.B. eine kuenftige Domain)
+// kommen ueber die Variable ERLAUBTE_URSPRUENGE dazu, kommagetrennt.
+const STANDARD_URSPRUENGE = [
+  "https://test.roewise.com",
+  "https://roewise.com",
+  "https://www.roewise.com",
+  "https://foehr.roewise.com",
+];
+
+function corsKopfzeilen(request, env) {
+  const ursprung = request.headers.get("Origin");
+  const erlaubt = new Set([
+    ...STANDARD_URSPRUENGE,
+    ...String(env.ERLAUBTE_URSPRUENGE || "")
+      .split(",")
+      .map((eintrag) => eintrag.trim())
+      .filter(Boolean),
+  ]);
+  const kopf = {
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Passwort",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+  // Ohne passenden Ursprung bleibt der Allow-Origin-Kopf weg; der Browser
+  // verwirft die Antwort dann selbst.
+  if (ursprung && erlaubt.has(ursprung)) kopf["Access-Control-Allow-Origin"] = ursprung;
+  return kopf;
+}
 
 function json(daten, status = 200) {
   return new Response(JSON.stringify(daten), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Cache-Control": "no-store",
+    },
   });
+}
+
+// Setzt die CORS-Kopfzeilen erst auf die fertige Antwort. So bleibt json()
+// zustandslos und es kann bei gleichzeitigen Anfragen kein fremder Ursprung
+// in eine Antwort geraten.
+function mitCors(antwort, request, env) {
+  const kopf = new Headers(antwort.headers);
+  for (const [name, wert] of Object.entries(corsKopfzeilen(request, env))) {
+    kopf.set(name, wert);
+  }
+  return new Response(antwort.body, { status: antwort.status, headers: kopf });
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsKopfzeilen(request, env) });
+    }
 
+    return mitCors(await this.route(request, env), request, env);
+  },
+
+  async route(request, env) {
     const url = new URL(request.url);
 
     try {
@@ -303,6 +353,9 @@ export default {
       }
       if (url.pathname === "/api/zugriff" && request.method === "GET") {
         return await pruefeZugriff(request, env);
+      }
+      if (url.pathname === "/api/stellen" && request.method === "GET") {
+        return await geschuetzteStellen(request, env);
       }
       if (url.pathname === "/api/katalog" && request.method === "GET") {
         return await katalog(env);
@@ -339,6 +392,24 @@ export default {
 
 function filterWert(value) {
   return encodeURIComponent(String(value || ""));
+}
+
+// Kennungen aus dem Browser gehoeren nie ungeprueft in einen Datenbankfilter.
+const UUID_MUSTER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function istUuid(wert) {
+  return typeof wert === "string" && UUID_MUSTER.test(wert);
+}
+
+// PayPal-Kennungen sind kurz und alphanumerisch (z.B. "I-BW452GLLEP1G").
+function istPaypalKennung(wert) {
+  return typeof wert === "string" && wert.length <= 64 && /^[A-Za-z0-9._-]+$/.test(wert);
+}
+
+// Adresse der oeffentlichen Seiten. Steht in einer Variablen, damit der
+// Domainwechsel vor dem Livegang an einer einzigen Stelle passiert.
+function basisUrl(env) {
+  return String(env.OEFFENTLICHE_BASIS_URL || "https://test.roewise.com").replace(/\/+$/, "");
 }
 
 function verkaufBereit(env) {
@@ -427,82 +498,16 @@ async function rechtserklaerung(request, env, type) {
 
   const data = validation.value;
   const db = supabaseClient(env);
-  const profiles = await db.select(
-    "customer_profiles",
-    `email=eq.${filterWert(data.email)}&select=id,email`
-  );
-  let subscription = null;
-  let customerId = null;
-  if (profiles.length > 0) {
-    customerId = profiles[0].id;
-    const subscriptions = await db.select(
-      "subscriptions",
-      `customer_id=eq.${customerId}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis`
-    );
-    subscription = subscriptions.find((entry) =>
-      entry.vertragsnummer === data.contractReference || entry.paypal_subscription_id === data.contractReference
-    ) || null;
-  }
-
   const now = new Date().toISOString();
-  let effectiveAt = null;
-  let processingStatus = subscription ? "zugeordnet" : "manuelle_pruefung";
-  let cancellationRefundCents = 0;
-  let refunded = false;
-  if (subscription) {
-    if (type === "kuendigung") {
-      const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd);
-      effectiveAt = result.effectiveAt;
-      processingStatus = result.processingStatus;
-      cancellationRefundCents = result.refundedCents;
-    } else if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
-      const cancelled = await kuendigeAbo(
-        env,
-        subscription.paypal_subscription_id,
-        "Widerruf durch Kunden"
-      );
-      if (!cancelled) processingStatus = "paypal_pruefung_noetig";
-    }
-    if (type === "widerruf") {
-      const payments = await db.select(
-        "payments",
-        `subscription_id=eq.${subscription.id}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
-      );
-      if (payments.length > 0 && payments[0].paypal_capture_id) {
-        try {
-          await erstatteZahlung(env, payments[0].paypal_capture_id);
-          await db.update("payments", `id=eq.${payments[0].id}`, {
-            status: "erstattet",
-            erstattet_cent: payments[0].betrag_cent,
-            erstattet_am: now,
-          });
-          refunded = true;
-          processingStatus = "erstattet";
-        } catch (error) {
-          console.error("Automatische Widerrufserstattung fehlgeschlagen", error);
-          processingStatus = "erstattung_manuell_pruefen";
-        }
-      } else {
-        processingStatus = "keine_zahlung_gefunden";
-      }
-    }
-    if (type === "widerruf") {
-      effectiveAt = now;
-      await db.update("subscriptions", `id=eq.${subscription.id}`, {
-        status: refunded ? "erstattet" : "widerrufen",
-        gekuendigt_am: now,
-        kuendigungswirksam_am: now,
-        aktualisiert_am: now,
-      });
-    }
-  }
 
+  // Die Erklaerung wird ZUERST gespeichert - vor jeder Verarbeitung. Geht
+  // danach etwas schief (PayPal nicht erreichbar, Datenbankfehler bei der
+  // Statusaenderung), bleibt der Eingang trotzdem erhalten und wird bestaetigt.
   const declarationText = type === "widerruf"
     ? `Hiermit widerrufe ich den Vertrag ${data.contractReference}.`
     : `Hiermit kündige ich den Vertrag ${data.contractReference} ${data.declarationKind}.`;
   const rows = await db.insert("legal_declarations", [{
     typ: type,
-    subscription_id: subscription?.id || null,
     name: data.name,
     email: data.email,
     vertragsreferenz: data.contractReference,
@@ -510,14 +515,101 @@ async function rechtserklaerung(request, env, type) {
     erklaerungsart: data.declarationKind,
     grund: data.reason,
     gewuenschtes_ende: data.requestedEnd?.toISOString() || null,
-    wirksam_zum: effectiveAt,
     erklaerungstext: declarationText,
+    eingegangen_am: now,
+    zugeordnet: false,
+    verarbeitungsstatus: "eingegangen",
+  }]);
+  const declarationId = rows[0].id;
+
+  let subscription = null;
+  let customerId = null;
+  let effectiveAt = null;
+  let processingStatus = "manuelle_pruefung";
+  let cancellationRefundCents = 0;
+  let refunded = false;
+
+  try {
+    const profiles = await db.select(
+      "customer_profiles",
+      `email=eq.${filterWert(data.email)}&select=id,email`
+    );
+    if (profiles.length > 0) {
+      customerId = profiles[0].id;
+      const subscriptions = await db.select(
+        "subscriptions",
+        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis`
+      );
+      // Die Vertragsreferenz muss zu genau dem Konto gehoeren, dessen
+      // E-Mail-Adresse angegeben wurde. Sonst bleibt es bei manueller Pruefung.
+      subscription = subscriptions.find((entry) =>
+        entry.vertragsnummer === data.contractReference || entry.paypal_subscription_id === data.contractReference
+      ) || null;
+    }
+    if (subscription) processingStatus = "zugeordnet";
+
+    if (subscription) {
+      if (type === "kuendigung") {
+        const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd);
+        effectiveAt = result.effectiveAt;
+        processingStatus = result.processingStatus;
+        cancellationRefundCents = result.refundedCents;
+      } else if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
+        const cancelled = await kuendigeAbo(
+          env,
+          subscription.paypal_subscription_id,
+          "Widerruf durch Kunden"
+        );
+        if (!cancelled) processingStatus = "paypal_pruefung_noetig";
+      }
+      if (type === "widerruf") {
+        const payments = await db.select(
+          "payments",
+          `subscription_id=eq.${filterWert(subscription.id)}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
+        );
+        if (payments.length > 0 && payments[0].paypal_capture_id) {
+          try {
+            await erstatteZahlung(env, payments[0].paypal_capture_id);
+            await db.update("payments", `id=eq.${filterWert(payments[0].id)}`, {
+              status: "erstattet",
+              erstattet_cent: payments[0].betrag_cent,
+              erstattet_am: now,
+            });
+            refunded = true;
+            processingStatus = "erstattet";
+          } catch (error) {
+            console.error("Automatische Widerrufserstattung fehlgeschlagen", error);
+            processingStatus = "erstattung_manuell_pruefen";
+          }
+        } else {
+          processingStatus = "keine_zahlung_gefunden";
+        }
+        effectiveAt = now;
+        await db.update("subscriptions", `id=eq.${filterWert(subscription.id)}`, {
+          status: refunded ? "erstattet" : "widerrufen",
+          gekuendigt_am: now,
+          kuendigungswirksam_am: now,
+          aktualisiert_am: now,
+        });
+      }
+    }
+  } catch (error) {
+    // Der Eingang steht bereits in der Datenbank. Die Erklaerung gilt damit
+    // als abgegeben; die Folgeverarbeitung uebernimmt der Betreiber.
+    console.error("Verarbeitung der Rechtserklaerung fehlgeschlagen", error);
+    processingStatus = "verarbeitung_fehlgeschlagen_manuell_pruefen";
+  }
+
+  await db.update("legal_declarations", `id=eq.${filterWert(declarationId)}`, {
+    subscription_id: subscription?.id || null,
+    wirksam_zum: effectiveAt,
     zugeordnet: Boolean(subscription),
     verarbeitungsstatus: processingStatus,
-  }]);
+  });
+
   let confirmation = declarationConfirmation({
     type,
-    receiptId: rows[0].id,
+    receiptId: declarationId,
     receivedAt: now,
     data,
     effectiveAt,
@@ -529,18 +621,37 @@ async function rechtserklaerung(request, env, type) {
   } else if (cancellationRefundCents > 0) {
     confirmation += `\n\nAnteilige Erstattung angewiesen: ${(cancellationRefundCents / 100).toFixed(2).replace(".", ",")} EUR.`;
   }
-  await db.update("legal_declarations", `id=eq.${rows[0].id}`, { bestaetigt_am: now });
-  await nachrichtVormerken(db, env, {
-    customerId,
-    declarationId: rows[0].id,
-    to: data.email,
-    subject: `${type === "widerruf" ? "Widerruf" : "Kündigung"} – Eingangsbestätigung ${rows[0].id}`,
-    text: confirmation,
-  });
+  // Auch das Bestaetigen und Verschicken darf die Erklaerung nicht mehr
+  // gefaehrden: schlaegt es fehl, bleibt der Eingang gespeichert und die
+  // Bestaetigung erscheint trotzdem sofort auf der Webseite.
+  try {
+    await db.update("legal_declarations", `id=eq.${filterWert(declarationId)}`, { bestaetigt_am: now });
+    await nachrichtVormerken(db, env, {
+      customerId,
+      declarationId,
+      to: data.email,
+      subject: `${type === "widerruf" ? "Widerruf" : "Kündigung"} – Eingangsbestätigung ${declarationId}`,
+      text: confirmation,
+    });
+
+    // Der Betreiber wird ebenfalls informiert. Erklaerungen, die nicht
+    // automatisch zugeordnet oder erstattet werden konnten, muessen von Hand
+    // bearbeitet werden und duerfen nicht unbemerkt liegen bleiben.
+    if (env.BETREIBER_EMAIL) {
+      await nachrichtVormerken(db, env, {
+        declarationId,
+        to: env.BETREIBER_EMAIL,
+        subject: `Bearbeiten: ${type} ${processingStatus} (${declarationId})`,
+        text: `Bearbeitungsstatus: ${processingStatus}\nZugeordnet: ${Boolean(subscription)}\n\n${confirmation}`,
+      });
+    }
+  } catch (error) {
+    console.error("Bestaetigung der Rechtserklaerung konnte nicht versandt werden", error);
+  }
 
   return json({
     status: "eingegangen",
-    vorgangsnummer: rows[0].id,
+    vorgangsnummer: declarationId,
     eingegangen_am: now,
     bestaetigung: confirmation,
   });
@@ -689,7 +800,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
         ? new Date(abos[0].leistungsbeginn_am)
         : new Date();
       const darfStarten = abos[0].sofortiger_beginn || leistungsbeginn <= new Date();
-      await db.update("subscriptions", `paypal_subscription_id=eq.${resource.id}`, {
+      await db.update("subscriptions", `paypal_subscription_id=eq.${filterWert(resource.id)}`, {
         status: darfStarten ? "aktiv" : "wartet_auf_leistungsbeginn",
         paypal_payer_id: resource.subscriber?.payer_id || null,
         beginn: resource.start_time || new Date().toISOString(),
@@ -741,7 +852,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // aktualisiert den bezahlten Zeitraum anhand der aktuellen PayPal-Daten.
       const details = await holeAboDetails(env, subId);
       const darfStarten = abo.sofortiger_beginn || (abo.leistungsbeginn_am && new Date(abo.leistungsbeginn_am) <= new Date());
-      await db.update("subscriptions", `id=eq.${abo.id}`, {
+      await db.update("subscriptions", `id=eq.${filterWert(abo.id)}`, {
         status: darfStarten ? "aktiv" : "wartet_auf_leistungsbeginn",
         naechste_zahlung: details.billing_info?.next_billing_time || null,
         bezahlt_bis: details.billing_info?.next_billing_time || abo.bezahlt_bis,
@@ -754,7 +865,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
     case "BILLING.SUBSCRIPTION.PAYMENT.FAILED": {
       const abos = await db.select(
         "subscriptions",
-        `paypal_subscription_id=eq.${resource.id}&select=id`
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id`
       );
       if (abos.length === 0) break;
       const kulanzTage = parseInt(env.KULANZ_TAGE || "3", 10);
@@ -770,7 +881,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
     case "BILLING.SUBSCRIPTION.SUSPENDED":
     case "BILLING.SUBSCRIPTION.EXPIRED": {
       const neuerStatus = typ.endsWith("EXPIRED") ? "abgelaufen" : "gesperrt";
-      await db.update("subscriptions", `paypal_subscription_id=eq.${resource.id}`, {
+      await db.update("subscriptions", `paypal_subscription_id=eq.${filterWert(resource.id)}`, {
         status: neuerStatus,
         aktualisiert_am: new Date().toISOString(),
       });
@@ -783,7 +894,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // aber der Status zeigt "gekuendigt".
       const abos = await db.select(
         "subscriptions",
-        `paypal_subscription_id=eq.${resource.id}&select=id,bezahlt_bis`
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,bezahlt_bis`
       );
       if (abos.length === 0) break;
       await db.update("subscriptions", `id=eq.${abos[0].id}`, {
@@ -802,7 +913,7 @@ async function verarbeiteEreignis(db, env, ereignis) {
       const urspruenglicheSaleId = resource.sale_id || resource.parent_payment;
       const aktualisiertePayments = await db.update(
         "payments",
-        `paypal_capture_id=eq.${urspruenglicheSaleId}`,
+        `paypal_capture_id=eq.${filterWert(urspruenglicheSaleId)}`,
         { status: "erstattet", erstattet_am: new Date().toISOString() }
       );
       if (aktualisiertePayments.length > 0) {
@@ -824,74 +935,118 @@ async function verarbeiteEreignis(db, env, ereignis) {
 // ---------- Zugriffspruefung (von der App bei jeder geschuetzten Aktion aufgerufen) ----------
 
 const ERLAUBTE_STATUS = new Set(["aktiv", "kulanzzeit", "gekuendigt_zum_ende"]);
-const MAX_GERAETE = 2;
+const STANDARD_MAX_GERAETE = 2;
 
-async function pruefeZugriff(request, env) {
+// Zentrale Entscheidung "darf dieses Geraet dieses Konto nutzen?". Sie wird
+// sowohl von /api/zugriff als auch vor der Auslieferung der Stellendaten
+// verwendet, damit beide Wege nie auseinanderlaufen koennen.
+async function entscheideZugriff(request, env) {
   const authHeader = request.headers.get("Authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "");
   const geraetId = new URL(request.url).searchParams.get("geraet");
 
-  if (!accessToken || !geraetId) {
-    return json({ erlaubt: false, grund: "fehlende_angaben" }, 400);
+  // Die Geraetekennung wird auf dem Geraet erzeugt und landet in der
+  // Datenbank; sie muss deshalb ein eng begrenztes Format haben.
+  if (!accessToken || !istUuid(geraetId)) {
+    return { erlaubt: false, grund: "fehlende_angaben", status: 400 };
   }
 
   const authUserId = await pruefeNutzerToken(env, accessToken);
   if (!authUserId) {
-    return json({ erlaubt: false, grund: "nicht_angemeldet" }, 401);
+    return { erlaubt: false, grund: "nicht_angemeldet", status: 401 };
   }
 
   const db = supabaseClient(env);
 
   const profile = await db.select(
     "customer_profiles",
-    `auth_user_id=eq.${authUserId}&select=id`
+    `auth_user_id=eq.${filterWert(authUserId)}&select=id`
   );
-  if (profile.length === 0) {
-    return json({ erlaubt: false, grund: "kein_profil" });
-  }
+  if (profile.length === 0) return { erlaubt: false, grund: "kein_profil" };
   const customerId = profile[0].id;
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${customerId}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am&order=erstellt_am.desc&limit=1`
+    `customer_id=eq.${filterWert(customerId)}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am,tariffs(max_geraete)&order=erstellt_am.desc&limit=1`
   );
-  if (abos.length === 0) {
-    return json({ erlaubt: false, grund: "kein_abo" });
-  }
+  if (abos.length === 0) return { erlaubt: false, grund: "kein_abo" };
   const abo = abos[0];
 
-  if (abo.manuell_gesperrt) {
-    return json({ erlaubt: false, grund: "manuell_gesperrt" });
-  }
+  if (abo.manuell_gesperrt) return { erlaubt: false, grund: "manuell_gesperrt" };
   if (!ERLAUBTE_STATUS.has(abo.status)) {
-    return json({ erlaubt: false, grund: "abo_status_" + abo.status });
+    return { erlaubt: false, grund: "abo_status_" + abo.status };
   }
+  // Ohne bekanntes Vertragsende darf ein gekuendigter Vertrag keinen
+  // unbegrenzten Zugang ergeben.
   if (abo.status === "gekuendigt_zum_ende" && !abo.bezahlt_bis) {
-    return json({ erlaubt: false, grund: "vertragsende_ungeklaert" });
+    return { erlaubt: false, grund: "vertragsende_ungeklaert" };
   }
   if (abo.kuendigungswirksam_am && new Date(abo.kuendigungswirksam_am) <= new Date()) {
-    return json({ erlaubt: false, grund: "kuendigung_wirksam" });
+    return { erlaubt: false, grund: "kuendigung_wirksam" };
   }
   if (abo.bezahlt_bis && new Date(abo.bezahlt_bis) < new Date()) {
-    return json({ erlaubt: false, grund: "bezahlter_zeitraum_beendet" });
+    return { erlaubt: false, grund: "bezahlter_zeitraum_beendet" };
   }
 
-  // Geraet registrieren/aktualisieren, Geraetelimit pruefen.
+  // Geraet registrieren/aktualisieren, Geraetelimit aus dem gebuchten Tarif.
+  const maxGeraete = abo.tariffs?.max_geraete ?? STANDARD_MAX_GERAETE;
   const geraete = await db.select(
     "devices",
-    `customer_id=eq.${customerId}&select=id,geraet_name`
+    `customer_id=eq.${filterWert(customerId)}&select=id,geraet_name`
   );
   const bekannt = geraete.find((g) => g.geraet_name === geraetId);
   if (!bekannt) {
-    if (geraete.length >= MAX_GERAETE) {
-      return json({ erlaubt: false, grund: "geraetelimit_erreicht", maxGeraete: MAX_GERAETE });
+    if (geraete.length >= maxGeraete) {
+      return { erlaubt: false, grund: "geraetelimit_erreicht", maxGeraete };
     }
     await db.insert("devices", [{ customer_id: customerId, geraet_name: geraetId, bestaetigt: true }]);
   } else {
-    await db.update("devices", `id=eq.${bekannt.id}`, { zuletzt_aktiv: new Date().toISOString() });
+    await db.update("devices", `id=eq.${filterWert(bekannt.id)}`, {
+      zuletzt_aktiv: new Date().toISOString(),
+    });
   }
 
-  return json({ erlaubt: true, status: abo.status });
+  return { erlaubt: true, status: abo.status, maxGeraete, bezahltBis: abo.bezahlt_bis };
+}
+
+async function pruefeZugriff(request, env) {
+  const ergebnis = await entscheideZugriff(request, env);
+  const { status = 200, ...rest } = ergebnis;
+  return json(rest, ergebnis.erlaubt ? 200 : status);
+}
+
+// Liefert die Stellendaten nur an berechtigte Konten aus. Damit haengt der
+// Schutz nicht mehr allein an einer Sperrschicht im Browser.
+// WICHTIG: Das wirkt erst, wenn die Datei nicht zusaetzlich oeffentlich als
+// statische Datei erreichbar ist (siehe Abschlussbericht).
+async function geschuetzteStellen(request, env) {
+  const ergebnis = await entscheideZugriff(request, env);
+  if (!ergebnis.erlaubt) {
+    const { status = 403, ...rest } = ergebnis;
+    return json(rest, status === 200 ? 403 : status);
+  }
+
+  const quelle = env.STELLEN_QUELLE_URL;
+  if (!quelle) return json({ fehler: "stellenquelle_nicht_konfiguriert" }, 503);
+
+  const antwort = await fetch(quelle, {
+    headers: env.STELLEN_QUELLE_TOKEN
+      ? { Authorization: "Bearer " + env.STELLEN_QUELLE_TOKEN }
+      : {},
+    cf: { cacheTtl: 300 },
+  });
+  if (!antwort.ok) return json({ fehler: "stellen_nicht_verfuegbar" }, 502);
+
+  return new Response(antwort.body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/geo+json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      // Kurz zwischenspeichern, aber nur privat: nach Vertragsende soll keine
+      // dauerhaft nutzbare Kopie im Zwischenspeicher zurueckbleiben.
+      "Cache-Control": "private, max-age=300",
+    },
+  });
 }
 
 // ---------- Abo nach PayPal-Bestaetigung anlegen ----------
@@ -910,7 +1065,13 @@ async function aboAnlegen(request, env) {
 
   const body = await request.json().catch(() => ({}));
   const { paypal_subscription_id, tariff_code } = body;
-  if (!paypal_subscription_id || !tariff_code || body.agb_akzeptiert !== true || typeof body.sofortiger_beginn !== "boolean") {
+  if (
+    !istPaypalKennung(paypal_subscription_id) ||
+    typeof tariff_code !== "string" ||
+    !/^[a-z0-9-]{1,40}$/.test(tariff_code) ||
+    body.agb_akzeptiert !== true ||
+    typeof body.sofortiger_beginn !== "boolean"
+  ) {
     return json({ fehler: "fehlende_angaben" }, 400);
   }
 
@@ -964,7 +1125,7 @@ async function aboAnlegen(request, env) {
 
   const andereVertraege = await db.select(
     "subscriptions",
-    `customer_id=eq.${customerId}&status=in.(wird_geprueft,wartet_auf_leistungsbeginn,aktiv,kulanzzeit,gekuendigt_zum_ende)&select=id&limit=1`
+    `customer_id=eq.${filterWert(customerId)}&status=in.(wird_geprueft,wartet_auf_leistungsbeginn,aktiv,kulanzzeit,gekuendigt_zum_ende)&select=id&limit=1`
   );
   if (andereVertraege.length > 0) {
     await kuendigeAbo(env, paypal_subscription_id, "Doppelte Bestellung verhindert");
@@ -1029,15 +1190,15 @@ async function aboAnlegen(request, env) {
     "Technische Voraussetzungen: aktueller Browser und Internetzugang; nach dem ersten Laden sind Teile der Anwendung offline nutzbar.",
     "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
     "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
-    "Kündigung: im Kundenbereich oder ohne Anmeldung unter https://test.roewise.com/kuendigen.html.",
+    `Kündigung: im Kundenbereich oder ohne Anmeldung unter ${basisUrl(env)}/kuendigen.html.`,
     "",
     "Widerrufsbelehrung",
-    "Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie https://test.roewise.com/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.",
+    `Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie ${basisUrl(env)}/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.`,
     "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschbärt Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
     "",
     `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag unbefristet weiter und kann jederzeit beendet werden; für ungenutzte vorausbezahlte Restzeit erfolgt eine anteilige Erstattung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
-    "Zusätzliche lesbare Fassung: https://test.roewise.com/agb.html",
-    "Datenschutz: https://test.roewise.com/datenschutz.html",
+    `Zusätzliche lesbare Fassung: ${basisUrl(env)}/agb.html`,
+    `Datenschutz: ${basisUrl(env)}/datenschutz.html`,
   ].join("\n");
   await nachrichtVormerken(db, env, {
     customerId,
@@ -1058,12 +1219,12 @@ async function kundeKuendigt(request, env) {
   if (!authUserId) return json({ fehler: "nicht_angemeldet" }, 401);
 
   const db = supabaseClient(env);
-  const profile = await db.select("customer_profiles", `auth_user_id=eq.${authUserId}&select=id,email`);
+  const profile = await db.select("customer_profiles", `auth_user_id=eq.${filterWert(authUserId)}&select=id,email`);
   if (profile.length === 0) return json({ fehler: "kein_profil" }, 404);
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${profile[0].id}&status=in.(wird_geprueft,aktiv,kulanzzeit,wartet_auf_leistungsbeginn)&select=id,status,paypal_subscription_id,bezahlt_bis,mindestlaufzeit_bis,vertragsnummer,tariffs(bezeichnung)&limit=1`
+    `customer_id=eq.${filterWert(profile[0].id)}&status=in.(wird_geprueft,aktiv,kulanzzeit,wartet_auf_leistungsbeginn)&select=id,status,paypal_subscription_id,bezahlt_bis,mindestlaufzeit_bis,vertragsnummer,tariffs(bezeichnung)&limit=1`
   );
   if (abos.length === 0) return json({ fehler: "kein_aktives_abo" }, 404);
   const abo = abos[0];
@@ -1110,21 +1271,21 @@ async function kundeEntferntGeraet(request, env) {
   if (!authUserId) return json({ fehler: "nicht_angemeldet" }, 401);
 
   const body = await request.json().catch(() => ({}));
-  if (!body.device_id) return json({ fehler: "fehlende_angaben" }, 400);
+  if (!istUuid(body.device_id)) return json({ fehler: "fehlende_angaben" }, 400);
 
   const db = supabaseClient(env);
-  const profile = await db.select("customer_profiles", `auth_user_id=eq.${authUserId}&select=id`);
+  const profile = await db.select("customer_profiles", `auth_user_id=eq.${filterWert(authUserId)}&select=id`);
   if (profile.length === 0) return json({ fehler: "kein_profil" }, 404);
 
   // Nur loeschen, wenn das Geraet wirklich diesem Kunden gehoert (sonst
   // koennte ein Kunde ueber eine geratene ID fremde Geraete entfernen).
   const geraete = await db.select(
     "devices",
-    `id=eq.${body.device_id}&customer_id=eq.${profile[0].id}&select=id`
+    `id=eq.${filterWert(body.device_id)}&customer_id=eq.${filterWert(profile[0].id)}&select=id`
   );
   if (geraete.length === 0) return json({ fehler: "geraet_nicht_gefunden" }, 404);
 
-  await db.delete("devices", `id=eq.${body.device_id}`);
+  await db.delete("devices", `id=eq.${filterWert(body.device_id)}`);
   return json({ status: "entfernt" });
 }
 
@@ -1170,7 +1331,7 @@ async function taeglicherAbgleich(env) {
       else if (paypalStatus === "EXPIRED") neuerStatus = "abgelaufen";
 
       if (neuerStatus && neuerStatus !== abo.status) {
-        await db.update("subscriptions", `id=eq.${abo.id}`, {
+        await db.update("subscriptions", `id=eq.${filterWert(abo.id)}`, {
           status: neuerStatus,
           naechste_zahlung: details.billing_info?.next_billing_time || null,
           aktualisiert_am: new Date().toISOString(),
@@ -1188,7 +1349,7 @@ async function taeglicherAbgleich(env) {
     `status=eq.kulanzzeit&kulanz_bis=lt.${jetzt}&select=id`
   );
   for (const abo of abgelaufeneKulanz) {
-    await db.update("subscriptions", `id=eq.${abo.id}`, {
+    await db.update("subscriptions", `id=eq.${filterWert(abo.id)}`, {
       status: "gesperrt",
       aktualisiert_am: jetzt,
     });
@@ -1261,7 +1422,7 @@ async function adminAnfrage(request, env, url) {
   }
   if (pfad === "/api/admin/geraete-zuruecksetzen" && request.method === "POST") {
     const body = await request.json().catch(() => ({}));
-    if (!body.customer_id) return json({ fehler: "fehlende_angaben" }, 400);
+    if (!istUuid(body.customer_id)) return json({ fehler: "fehlende_angaben" }, 400);
     return await adminGeraeteZuruecksetzen(env, db, body.customer_id);
   }
 
@@ -1292,9 +1453,9 @@ async function adminUebersicht(db) {
 
 async function adminAktion(request, env, db, aktionsName, patch) {
   const body = await request.json().catch(() => ({}));
-  if (!body.subscription_id) return json({ fehler: "fehlende_angaben" }, 400);
+  if (!istUuid(body.subscription_id)) return json({ fehler: "fehlende_angaben" }, 400);
 
-  await db.update("subscriptions", `id=eq.${body.subscription_id}`, {
+  await db.update("subscriptions", `id=eq.${filterWert(body.subscription_id)}`, {
     ...patch,
     aktualisiert_am: new Date().toISOString(),
   });
@@ -1310,18 +1471,8 @@ async function adminAktion(request, env, db, aktionsName, patch) {
 }
 
 async function adminGeraeteZuruecksetzen(env, db, customerId) {
-  const geraete = await db.select("devices", `customer_id=eq.${customerId}&select=id`);
-  for (const g of geraete) {
-    await db.update("devices", `id=eq.${g.id}`, { bestaetigt: false });
-  }
   // Loeschen statt nur markieren, damit sofort wieder neue Geraete moeglich sind.
-  await fetch(`${env.SUPABASE_URL}/rest/v1/devices?customer_id=eq.${customerId}`, {
-    method: "DELETE",
-    headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: "Bearer " + env.SUPABASE_SERVICE_ROLE_KEY,
-    },
-  });
+  await db.delete("devices", `customer_id=eq.${filterWert(customerId)}`);
   await db.insert("admin_actions", [
     { admin_name: "Joerg", aktion: "geraete_zurueckgesetzt", customer_id: customerId },
   ]);

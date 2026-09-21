@@ -71,6 +71,10 @@
 <script>
   const SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtbnRhaGd0YWdqaWpmeWVlcGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4OTE2ODEsImV4cCI6MjEwNTQ2NzY4MX0.YzXfS98rli0PvIXmIyBAg9KJjcOW2NlXZq9fHzpcA0g";
+  if (!window.supabase || !window.supabase.createClient) {
+    document.body.textContent = "Die Rechnungsansicht kann gerade nicht geladen werden. Bitte die Seite neu laden.";
+    throw new Error("Anmeldebibliothek nicht verfuegbar");
+  }
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   function formatDatum(iso){

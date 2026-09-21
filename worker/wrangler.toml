@@ -12,12 +12,31 @@ KULANZ_TAGE = "3"
 SALES_ENABLED = "false"
 TRANSACTIONAL_FROM = "Roewise <noreply@roewise.com>"
 
+# Adresse der oeffentlichen Seiten. Steht in allen Vertrags-, Kuendigungs- und
+# Widerrufsbestaetigungen. Beim Domainwechsel nur hier aendern.
+OEFFENTLICHE_BASIS_URL = "https://test.roewise.com"
+
+# Empfaenger fuer Betreiber-Benachrichtigungen (eingegangene Kuendigungen und
+# Widerrufe, besonders die Faelle mit "manuell_pruefen").
+BETREIBER_EMAIL = "wasserentnahme-foehr@web.de"
+
+# Zusaetzlich erlaubte Aufrufer (CORS), kommagetrennt. Die eigenen Domains
+# stehen bereits fest im Worker-Code.
+ERLAUBTE_URSPRUENGE = ""
+
+# Quelle fuer /api/stellen. Erst setzen, wenn die Stellendaten NICHT mehr
+# oeffentlich als statische Datei ausgeliefert werden - sonst bleibt der
+# Schutz wirkungslos (siehe INTEGRATION_LOESCHBAERT.md).
+# STELLEN_QUELLE_URL = "https://<privater-speicherort>/stellen.geojson"
+
 # Geheime Werte NICHT hier eintragen. Stattdessen im Cloudflare-Dashboard:
 # Worker -> Settings -> Variables and Secrets -> "Add" -> Typ "Secret":
 #   SUPABASE_SERVICE_ROLE_KEY   (Supabase -> Project Settings -> API -> service_role)
 #   PAYPAL_SECRET               (PayPal Developer -> App -> Secret)
 #   PAYPAL_WEBHOOK_ID           (wird bei der Webhook-Einrichtung vergeben, s. unten)
 #   RESEND_API_KEY              (Resend -> API Keys)
+#   ADMIN_PASSWORT              (frei gewaehltes langes Passwort)
+#   STELLEN_QUELLE_TOKEN        (nur falls die Stellenquelle ein Token braucht)
 # SALES_ENABLED erst nach Migration, Jahresplan, Webhook- und E-Mail-Test auf
 # "true" stellen. Bis dahin zeigt die Seite das Angebot ohne Kaufmöglichkeit.
 

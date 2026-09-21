@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Widerrufsbelehrung – Löschbärt Föhr</title>
-    <style>
+    <style>*{box-sizing:border-box}h1,h2{overflow-wrap:break-word;hyphens:auto}h1{font-size:clamp(22px,6.2vw,30px)}
       :root {
         --bg: #0d1116;
         --card: #161b22;
@@ -39,6 +39,33 @@
       }
       .muted {
         color: var(--muted);
+      }
+      button.sekundaer {
+        margin-top: 10px;
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border, #303844);
+        font-weight: 600;
+      }
+      #zusammenfassung {
+        margin-top: 24px;
+        padding: 18px;
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+      }
+      #zusammenfassung dt {
+        margin-top: 10px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--muted);
+      }
+      #zusammenfassung dd {
+        margin: 2px 0 0;
+      }
+      :focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
       }
       form,
       .box {
@@ -140,15 +167,29 @@
             name="vertragsreferenz"
             required
             maxlength="160"
-            placeholder="z. B. LM-2026-…" /></label
+            placeholder="z. B. LB-2026-…" /></label
         ><label
           >Vertrag<input
             name="vertragsbezeichnung"
             value="Löschbärt Föhr – Jahreszugang"
             required /></label
-        ><button type="submit">Widerruf bestätigen</button>
+        ><button type="submit">Angaben prüfen</button>
       </form>
-      <div id="result" role="status"></div>
+
+      <section id="zusammenfassung" hidden aria-labelledby="zusammenfassung-titel">
+        <h2 id="zusammenfassung-titel">Angaben prüfen</h2>
+        <p class="muted">
+          Bitte prüfen Sie Ihre Angaben. Erst mit „Widerruf bestätigen“ wird der
+          Widerruf verbindlich übermittelt.
+        </p>
+        <dl id="zusammenfassung-liste"></dl>
+        <button type="button" id="absenden">Widerruf bestätigen</button>
+        <button type="button" id="zurueck" class="sekundaer">
+          Angaben ändern
+        </button>
+      </section>
+
+      <div id="result" role="status" aria-live="polite"></div>
       <section class="box">
         <h2>Muster-Widerrufsformular</h2>
         <p>
@@ -166,10 +207,45 @@
       const WORKER_URL =
           "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev",
         form = document.getElementById("form"),
-        result = document.getElementById("result");
-      form.onsubmit = async (event) => {
+        result = document.getElementById("result"),
+        zusammenfassung = document.getElementById("zusammenfassung"),
+        liste = document.getElementById("zusammenfassung-liste");
+
+      const BESCHRIFTUNG = {
+        name: "Name",
+        email: "E-Mail-Adresse",
+        vertragsreferenz: "Vertragsnummer oder PayPal-Abo-ID",
+        vertragsbezeichnung: "Vertrag",
+      };
+
+      // Schritt 1: Zusammenfassung zeigen, noch nichts absenden.
+      form.onsubmit = (event) => {
         event.preventDefault();
+        const werte = Object.fromEntries(new FormData(form));
+        liste.textContent = "";
+        for (const [feld, beschriftung] of Object.entries(BESCHRIFTUNG)) {
+          const wert = (werte[feld] || "").trim();
+          if (!wert) continue;
+          const dt = document.createElement("dt");
+          dt.textContent = beschriftung;
+          const dd = document.createElement("dd");
+          dd.textContent = wert;
+          liste.append(dt, dd);
+        }
+        zusammenfassung.hidden = false;
+        zusammenfassung.scrollIntoView({ block: "nearest" });
+      };
+
+      document.getElementById("zurueck").onclick = () => {
+        zusammenfassung.hidden = true;
+        form.scrollIntoView({ block: "nearest" });
+      };
+
+      // Schritt 2: verbindlich übermitteln.
+      document.getElementById("absenden").onclick = async () => {
         const values = Object.fromEntries(new FormData(form));
+        const absendeknopf = document.getElementById("absenden");
+        absendeknopf.disabled = true;
         result.style.display = "block";
         result.className = "";
         result.textContent = "Widerruf wird übermittelt …";
@@ -191,6 +267,7 @@
           link.download = `widerrufsbestaetigung-${data.vorgangsnummer}.txt`;
           link.textContent = " Bestätigung herunterladen";
           result.append(document.createElement("br"), link);
+          zusammenfassung.hidden = true;
           form.querySelector("button").disabled = true;
         } catch (error) {
           result.className = "error";
@@ -198,6 +275,9 @@
             "Der Widerruf konnte nicht übermittelt werden: " +
             error.message +
             ". Bitte alternativ per E-Mail an wasserentnahme-foehr@web.de senden.";
+          // Erneutes Absenden muss möglich bleiben, damit die Erklärung nicht
+          // an einem vorübergehenden Fehler scheitert.
+          absendeknopf.disabled = false;
         }
       };
     </script>

@@ -70,6 +70,52 @@
       .hint {
         color: var(--muted);
       }
+      button.sekundaer {
+        margin-top: 10px;
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border, #303844);
+        font-weight: 600;
+      }
+      fieldset {
+        margin: 18px 0 0;
+        padding: 12px;
+        border: 1px solid var(--border, #303844);
+        border-radius: 10px;
+      }
+      legend {
+        padding: 0 6px;
+        font-weight: 700;
+      }
+      .zeile {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 8px;
+      }
+      .zeile input {
+        width: auto;
+      }
+      #zusammenfassung {
+        margin-top: 24px;
+        padding: 18px;
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+      }
+      #zusammenfassung dt {
+        margin-top: 10px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--muted);
+      }
+      #zusammenfassung dd {
+        margin: 2px 0 0;
+      }
+      :focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+      }
       #result {
         display: none;
         white-space: pre-wrap;
@@ -123,28 +169,123 @@
             </option>
             <option value="ausserordentlich">Außerordentlich</option>
           </select></label
-        ><label
-          >Gewünschtes Vertragsende (optional)<input
-            name="gewuenschtes_ende"
-            type="date" /></label
-        ><label
+        >
+        <fieldset>
+          <legend>Zeitpunkt der Beendigung</legend>
+          <label class="zeile"
+            ><input
+              type="radio"
+              name="endezeitpunkt"
+              value="fruehestmoeglich"
+              checked />
+            Zum frühestmöglichen Zeitpunkt</label
+          >
+          <label class="zeile"
+            ><input type="radio" name="endezeitpunkt" value="wunsch" /> Zu einem
+            Wunschdatum</label
+          >
+          <label
+            >Gewünschtes Vertragsende<input
+              name="gewuenschtes_ende"
+              type="date"
+              disabled
+          /></label>
+        </fieldset>
+        <label
           >Grund (bei außerordentlicher Kündigung empfohlen)<textarea
             name="grund"
             rows="4"
             maxlength="1000"
           ></textarea></label
-        ><button type="submit">Jetzt kündigen</button>
+        ><button type="submit">Kündigung prüfen</button>
       </form>
-      <div id="result" role="status"></div>
+
+      <section id="zusammenfassung" hidden aria-labelledby="zusammenfassung-titel">
+        <h2 id="zusammenfassung-titel">Angaben prüfen</h2>
+        <p class="hint">
+          Bitte prüfen Sie Ihre Angaben. Erst mit „Jetzt kündigen“ wird die
+          Kündigung verbindlich übermittelt.
+        </p>
+        <dl id="zusammenfassung-liste"></dl>
+        <button type="button" id="absenden">Jetzt kündigen</button>
+        <button type="button" id="zurueck" class="sekundaer">
+          Angaben ändern
+        </button>
+      </section>
+
+      <div id="result" role="status" aria-live="polite"></div>
     </main>
     <script>
       const WORKER_URL =
           "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev",
         form = document.getElementById("form"),
-        result = document.getElementById("result");
-      form.onsubmit = async (event) => {
+        result = document.getElementById("result"),
+        zusammenfassung = document.getElementById("zusammenfassung"),
+        liste = document.getElementById("zusammenfassung-liste"),
+        datumsfeld = form.querySelector('input[name="gewuenschtes_ende"]');
+
+      // Das Wunschdatum ist nur wählbar, wenn nicht "frühestmöglich" gilt.
+      form.querySelectorAll('input[name="endezeitpunkt"]').forEach((feld) => {
+        feld.addEventListener("change", () => {
+          const wunsch = feld.value === "wunsch" && feld.checked;
+          datumsfeld.disabled = !wunsch;
+          if (!wunsch) datumsfeld.value = "";
+        });
+      });
+
+      const BESCHRIFTUNG = {
+        name: "Name",
+        email: "E-Mail-Adresse",
+        vertragsreferenz: "Vertragsnummer oder PayPal-Abo-ID",
+        vertragsbezeichnung: "Vertrag",
+        erklaerungsart: "Art der Kündigung",
+        gewuenschtes_ende: "Gewünschtes Vertragsende",
+        grund: "Grund",
+      };
+
+      function angabenLesen() {
+        const werte = Object.fromEntries(new FormData(form));
+        // Bei "frühestmöglich" wird bewusst kein Wunschdatum übermittelt.
+        if (werte.endezeitpunkt !== "wunsch") werte.gewuenschtes_ende = "";
+        delete werte.endezeitpunkt;
+        return werte;
+      }
+
+      // Schritt 1: Zusammenfassung anzeigen, noch nichts absenden.
+      form.onsubmit = (event) => {
         event.preventDefault();
-        const values = Object.fromEntries(new FormData(form));
+        const werte = angabenLesen();
+        liste.textContent = "";
+        for (const [feld, beschriftung] of Object.entries(BESCHRIFTUNG)) {
+          const wert = (werte[feld] || "").trim();
+          if (!wert) continue;
+          const dt = document.createElement("dt");
+          dt.textContent = beschriftung;
+          const dd = document.createElement("dd");
+          dd.textContent = wert;
+          liste.append(dt, dd);
+        }
+        if (werte.gewuenschtes_ende === "" || !werte.gewuenschtes_ende) {
+          const dt = document.createElement("dt");
+          dt.textContent = "Gewünschtes Vertragsende";
+          const dd = document.createElement("dd");
+          dd.textContent = "zum frühestmöglichen Zeitpunkt";
+          liste.append(dt, dd);
+        }
+        zusammenfassung.hidden = false;
+        zusammenfassung.scrollIntoView({ block: "nearest" });
+      };
+
+      document.getElementById("zurueck").onclick = () => {
+        zusammenfassung.hidden = true;
+        form.scrollIntoView({ block: "nearest" });
+      };
+
+      // Schritt 2: verbindlich übermitteln.
+      document.getElementById("absenden").onclick = async () => {
+        const values = angabenLesen();
+        const absendeknopf = document.getElementById("absenden");
+        absendeknopf.disabled = true;
         result.style.display = "block";
         result.className = "";
         result.textContent = "Kündigung wird übermittelt …";
@@ -169,6 +310,7 @@
           link.download = `kuendigungsbestaetigung-${data.vorgangsnummer}.txt`;
           link.textContent = " Bestätigung herunterladen";
           result.append(document.createElement("br"), link);
+          zusammenfassung.hidden = true;
           form.querySelector("button").disabled = true;
         } catch (error) {
           result.className = "error";
@@ -176,6 +318,9 @@
             "Die Kündigung konnte nicht übermittelt werden: " +
             error.message +
             ". Bitte alternativ per E-Mail an wasserentnahme-foehr@web.de senden.";
+          // Erneutes Absenden muss möglich bleiben, damit die Erklärung nicht
+          // an einem vorübergehenden Fehler scheitert.
+          absendeknopf.disabled = false;
         }
       };
     </script>

@@ -42,9 +42,11 @@ export function validatePublicDeclaration(body, type) {
   };
 }
 
+// LB = Löschbärt. Die Nummer steht in Bestätigungen und auf Rechnungen und
+// ist damit für Kundinnen und Kunden sichtbar.
 export function createContractNumber(now = new Date(), random = crypto.randomUUID()) {
   const year = now.getUTCFullYear();
-  return `LM-${year}-${String(random).replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+  return `LB-${year}-${String(random).replace(/-/g, "").slice(0, 10).toUpperCase()}`;
 }
 
 export function calculateProRataRefund({ amountCents, periodStart, periodEnd, effectiveAt }) {

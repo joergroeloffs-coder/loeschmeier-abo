@@ -34,7 +34,7 @@ test("validiert eine ordentliche Kündigung", () => {
   const result = validatePublicDeclaration({
     name: "Max Muster",
     email: "MAX@example.de",
-    vertragsreferenz: "LM-2026-ABC",
+    vertragsreferenz: "LB-2026-ABC",
     vertragsbezeichnung: "Löschbärt Föhr – Jahresabo",
     erklaerungsart: "ordentlich",
   }, "kuendigung");
@@ -55,7 +55,7 @@ test("lehnt ein ungueltiges Wunschdatum ab", () => {
   const result = validatePublicDeclaration({
     name: "Erika Muster",
     email: "erika@example.test",
-    vertragsreferenz: "LM-2026-123",
+    vertragsreferenz: "LB-2026-123",
     vertragsbezeichnung: "Löschbärt Föhr – Jahresabo",
     erklaerungsart: "ordentlich",
     gewuenschtes_ende: "kein-datum",
@@ -67,7 +67,7 @@ test("lehnt ein ungueltiges Wunschdatum ab", () => {
 test("erzeugt eine lesbare Vertragsnummer", () => {
   assert.equal(
     createContractNumber(new Date("2026-09-21T00:00:00Z"), "12345678-abcd-0000-0000-000000000000"),
-    "LM-2026-12345678AB",
+    "LB-2026-12345678AB",
   );
 });
 
@@ -79,11 +79,11 @@ test("Bestätigung enthält Eingangszeit und Referenz", () => {
     data: {
       name: "Max Muster",
       email: "max@example.de",
-      contractReference: "LM-2026-ABC",
+      contractReference: "LB-2026-ABC",
       contractLabel: "Löschbärt Föhr – Jahresabo",
     },
   });
   assert.match(text, /Widerruf/);
   assert.match(text, /2026-09-21T10:00:00.000Z/);
-  assert.match(text, /LM-2026-ABC/);
+  assert.match(text, /LB-2026-ABC/);
 });

@@ -263,6 +263,18 @@
       const WORKER_URL =
         "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev";
 
+            // Ohne die Anmeldebibliothek kann die Seite nichts tun. Statt eines
+      // stummen Skriptabbruchs erscheint dann ein verständlicher Hinweis.
+      if (!window.supabase || !window.supabase.createClient) {
+        document.body.insertAdjacentHTML(
+          "afterbegin",
+          '<p style="margin:16px;padding:14px;border:1px solid #ff7b72;border-radius:8px;color:#ff7b72">' +
+            "Die Anmeldung kann gerade nicht geladen werden. Bitte die Seite neu laden. " +
+            "Besteht das Problem weiter, wenden Sie sich bitte an wasserentnahme-foehr@web.de." +
+            "</p>"
+        );
+        throw new Error("Anmeldebibliothek nicht verfuegbar");
+      }
       const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       const STATUS_TEXT = {

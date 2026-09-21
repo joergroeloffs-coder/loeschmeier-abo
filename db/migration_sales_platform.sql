@@ -121,7 +121,7 @@ create policy "eigene_rechtserklaerungen" on legal_declarations
 
 update tariffs
 set code = 'foehr-jahr',
-    slug = 'loeschmeier-foehr-privat',
+    slug = 'loeschbaert-foehr-privat',
     bezeichnung = 'Löschbärt Föhr – Jahreszugang',
     beschreibung = 'Digitale Wasserentnahmestellen- und Defibrillatorenkarte für Föhr',
     preis_cent = 1200,
@@ -138,7 +138,7 @@ insert into tariffs (
   zielgruppe, max_geraete, aktiv, oeffentlich
 )
 select
-  'gemeinde-vorlage', 'loeschmeier-gemeinde', 'Löschbärt – Gemeindeversion',
+  'gemeinde-vorlage', 'loeschbaert-gemeinde', 'Löschbärt – Gemeindeversion',
   'Deaktivierte Vorlage für künftige Gemeinde- und Feuerwehrverträge',
   0, 'EUR', 'individuell', 'organisation', 0, false, false
 where not exists (select 1 from tariffs where code = 'gemeinde-vorlage');
