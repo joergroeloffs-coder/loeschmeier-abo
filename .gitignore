@@ -1,3 +1,4 @@
 setup/paypal_zugangsdaten.json
+setup/supabase_zugangsdaten.json
 __pycache__/
 *.py[cod]
