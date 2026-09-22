@@ -218,6 +218,29 @@
         vertragsbezeichnung: "Vertrag",
       };
 
+      // Erzeugt aus dem Klartext-Nachweis ein lesbares, druckbares HTML-
+      // Dokument statt einer reinen .txt-Datei (die in jedem Editor ohne
+      // jede Formatierung ankommt).
+      function nachweisAlsHtml(titel, text) {
+        const escaped = String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        const mitLinks = escaped.replace(
+          /(https?:\/\/[^\s<]+)/g,
+          (url) => `<a href="${url}">${url}</a>`
+        );
+        const absaetze = mitLinks
+          .split(/\n{2,}/)
+          .map((a) => `<p>${a.replace(/\n/g, "<br>")}</p>`)
+          .join("\n");
+        return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${titel}</title><style>
+body{max-width:640px;margin:40px auto;padding:0 20px;background:#0d1116;color:#edf3f8;font:16px/1.6 system-ui,sans-serif}
+h1{font-size:21px}p{color:#a8b4c0}a{color:#43b3ff}
+@media print{body{background:#fff;color:#111}p{color:#333}}
+</style></head><body><h1>${titel}</h1>${absaetze}</body></html>`;
+      }
+
       // Schritt 1: Zusammenfassung zeigen, noch nichts absenden.
       form.onsubmit = (event) => {
         event.preventDefault();
@@ -259,12 +282,13 @@
           if (!response.ok)
             throw new Error(data.fehler || "Übermittlung fehlgeschlagen");
           result.textContent = data.bestaetigung;
-          const blob = new Blob([data.bestaetigung], {
-              type: "text/plain;charset=utf-8",
-            }),
+          const blob = new Blob(
+              [nachweisAlsHtml("Widerrufsbestätigung", data.bestaetigung)],
+              { type: "text/html;charset=utf-8" }
+            ),
             link = document.createElement("a");
           link.href = URL.createObjectURL(blob);
-          link.download = `widerrufsbestaetigung-${data.vorgangsnummer}.txt`;
+          link.download = `widerrufsbestaetigung-${data.vorgangsnummer}.html`;
           link.textContent = " Bestätigung herunterladen";
           result.append(document.createElement("br"), link);
           zusammenfassung.hidden = true;
