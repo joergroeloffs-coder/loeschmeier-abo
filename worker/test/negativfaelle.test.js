@@ -54,6 +54,11 @@ function baueUmgebung({ tabellen = {}, paypal = {}, emailFehler = false } = {}) 
         const erlaubt = wert.replace(/[()]/g, "").split(",");
         if (!erlaubt.includes(String(zeile[feld]))) return false;
       }
+      if (operator === "is") {
+        const sollNull = wert === "null";
+        const istNull = zeile[feld] === null || zeile[feld] === undefined;
+        if (sollNull !== istNull) return false;
+      }
     }
     return true;
   }
@@ -755,4 +760,58 @@ test("Ausserordentliche Kuendigung wirkt sofort und erstattet die ungenutzte Res
   assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "anteilig_erstattet");
   assert.ok(daten.payments[0].erstattet_cent > 0, "anteilige Erstattung erfolgt bei ausserordentlicher Kuendigung");
   assert.notEqual(daten.legal_declarations[0].wirksam_zum, paidUntil.toISOString(), "wirkt sofort, nicht erst zum Laufzeitende");
+});
+
+// ---- Manuell angelegter Zugang (Zahlung ausserhalb PayPal, z.B. Feuerwehr/
+// Gemeinde per Ueberweisung) ----
+
+test("Admin: manueller Zugang wird angelegt, ohne PayPal", async () => {
+  const { umgebung, daten } = baueUmgebung({ tabellen: { tariffs: [TARIF] } });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/manuell-anlegen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ email: "feuerwehr@example.test", tariff_code: "foehr-jahr", zahlungsreferenz: "RG-2026-001" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const ergebnis = await antwort.json();
+  assert.ok(ergebnis.vertragsnummer);
+  assert.equal(daten.customer_profiles.length, 1);
+  assert.equal(daten.customer_profiles[0].email, "feuerwehr@example.test");
+  assert.equal(daten.customer_profiles[0].auth_user_id, undefined, "noch nicht mit einer Anmeldung verknuepft");
+  assert.equal(daten.subscriptions.length, 1);
+  assert.equal(daten.subscriptions[0].status, "aktiv");
+  assert.equal(daten.subscriptions[0].paypal_subscription_id, null);
+  assert.ok(daten.subscriptions[0].notiz.includes("RG-2026-001"));
+});
+
+test("Admin: manueller Zugang ohne Passwort abgelehnt", async () => {
+  const { umgebung, daten } = baueUmgebung({ tabellen: { tariffs: [TARIF] } });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/admin/manuell-anlegen", {
+      methode: "POST",
+      koerper: { email: "feuerwehr@example.test", tariff_code: "foehr-jahr" },
+    }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 401);
+  assert.equal((daten.customer_profiles || []).length, 0);
+});
+
+test("Erstes Login verknuepft ein manuell angelegtes Profil automatisch mit der Anmeldung", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "kunde@example.test" }], // noch kein auth_user_id
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv",
+        bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 2 },
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/zugriff?geraet=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", { token: "gueltig" }), ENV);
+  const ergebnis = await antwort.json();
+  assert.equal(ergebnis.erlaubt, true);
+  assert.equal(daten.customer_profiles[0].auth_user_id, "user-1", "wird beim ersten Zugriff automatisch verknuepft");
 });

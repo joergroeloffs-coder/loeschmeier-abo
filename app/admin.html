@@ -63,6 +63,24 @@
   <h2>Überblick</h2>
   <div class="kacheln" id="kacheln"></div>
 
+  <h2>Zugang manuell anlegen</h2>
+  <p style="font-size:13px; color:var(--muted); margin:0 0 12px; max-width:520px">
+    Für Zahlung außerhalb von PayPal (Überweisung, Rechnung). Erstellt sofort
+    einen aktiven Vertrag; die Kundin/der Kunde meldet sich später ganz normal
+    mit dieser E-Mail-Adresse per Anmelde-Link an, der Zugang wird dann
+    automatisch verknüpft.
+  </p>
+  <div style="display:flex; flex-wrap:wrap; gap:10px; max-width:640px; margin-bottom:12px">
+    <input type="email" id="ma-email" placeholder="E-Mail-Adresse" style="flex:2; min-width:220px">
+    <input type="text" id="ma-tarif" placeholder="Tarif-Code (z.B. foehr-jahr)" style="flex:1; min-width:160px">
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:10px; max-width:640px; margin-bottom:12px">
+    <input type="text" id="ma-referenz" placeholder="Zahlungsreferenz / Notiz (z.B. Rechnungsnummer)" style="flex:2; min-width:220px">
+    <input type="date" id="ma-beginn" style="flex:1; min-width:160px" title="Leistungsbeginn (leer = sofort)">
+  </div>
+  <button id="ma-anlegen-btn">Zugang anlegen</button>
+  <p id="ma-status" style="font-size:13px; margin-top:8px"></p>
+
   <h2>Kunden</h2>
   <div id="tabelle-wrapper">
     <table>
@@ -166,6 +184,41 @@
       `;
     }).join("");
   }
+
+  document.getElementById("ma-anlegen-btn").addEventListener("click", async () => {
+    const email = document.getElementById("ma-email").value.trim();
+    const tariff_code = document.getElementById("ma-tarif").value.trim();
+    const zahlungsreferenz = document.getElementById("ma-referenz").value.trim();
+    const beginnFeld = document.getElementById("ma-beginn").value;
+    const statusEl = document.getElementById("ma-status");
+    if(!email || !tariff_code){
+      statusEl.style.color = "var(--fehler)";
+      statusEl.textContent = "E-Mail-Adresse und Tarif-Code sind nötig.";
+      return;
+    }
+    statusEl.style.color = "var(--muted)";
+    statusEl.textContent = "Wird angelegt …";
+    const res = await adminFetch("/api/admin/manuell-anlegen", {
+      method: "POST",
+      body: JSON.stringify({
+        email, tariff_code, zahlungsreferenz,
+        leistungsbeginn: beginnFeld ? new Date(beginnFeld).toISOString() : undefined,
+      }),
+    });
+    const daten = await res.json();
+    if(res.ok){
+      statusEl.style.color = "var(--preis)";
+      statusEl.textContent = `Angelegt: ${daten.vertragsnummer} (Leistungsbeginn ${formatDatum(daten.leistungsbeginn_am)})`;
+      document.getElementById("ma-email").value = "";
+      document.getElementById("ma-tarif").value = "";
+      document.getElementById("ma-referenz").value = "";
+      document.getElementById("ma-beginn").value = "";
+      ladeAlles();
+    } else {
+      statusEl.style.color = "var(--fehler)";
+      statusEl.textContent = "Fehler: " + (daten.fehler || res.status);
+    }
+  });
 
   async function sperren(id){
     if(!confirm("Diesen Kunden wirklich manuell sperren?")) return;

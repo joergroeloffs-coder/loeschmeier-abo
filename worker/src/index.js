@@ -5,6 +5,8 @@ import {
   calculateProRataRefund,
   createContractNumber,
   declarationConfirmation,
+  isValidEmail,
+  normalizeEmail,
   sendTextEmail,
   validatePublicDeclaration,
 } from "./legal.js";
@@ -751,10 +753,28 @@ async function entscheideZugriff(request, env) {
 
   const db = supabaseClient(env);
 
-  const profile = await db.select(
+  let profile = await db.select(
     "customer_profiles",
     `auth_user_id=eq.${filterWert(authUserId)}&select=id`
   );
+  if (profile.length === 0) {
+    // Kein per Anmeldung verknuepftes Profil gefunden. Das kommt vor, wenn
+    // der Betrieb einen Zugang manuell angelegt hat (z.B. Feuerwehr/Gemeinde
+    // nach Ueberweisung, ohne PayPal) - dort ist zu diesem Zeitpunkt nur die
+    // E-Mail-Adresse bekannt, noch keine Supabase-Nutzer-ID. Beim ersten
+    // Login wird das per E-Mail-Adresse gefundene, noch unverknuepfte Profil
+    // jetzt fest mit dieser Anmeldung verknuepft.
+    const unverknuepft = await db.select(
+      "customer_profiles",
+      `email=eq.${filterWert(nutzer.email)}&auth_user_id=is.null&select=id`
+    );
+    if (unverknuepft.length > 0) {
+      await db.update("customer_profiles", `id=eq.${filterWert(unverknuepft[0].id)}`, {
+        auth_user_id: authUserId,
+      });
+      profile = unverknuepft;
+    }
+  }
   if (profile.length === 0) return { erlaubt: false, grund: "kein_profil", betreiber };
   const customerId = profile[0].id;
 
@@ -1229,6 +1249,9 @@ async function adminAnfrage(request, env, url) {
       kulanz_bis: kulanzBis,
     });
   }
+  if (pfad === "/api/admin/manuell-anlegen" && request.method === "POST") {
+    return await adminManuellAnlegen(request, env, db);
+  }
   if (pfad === "/api/admin/geraete-zuruecksetzen" && request.method === "POST") {
     const body = await request.json().catch(() => ({}));
     if (!istUuid(body.customer_id)) return json({ fehler: "fehlende_angaben" }, 400);
@@ -1286,4 +1309,95 @@ async function adminGeraeteZuruecksetzen(env, db, customerId) {
     { admin_name: "Joerg", aktion: "geraete_zurueckgesetzt", customer_id: customerId },
   ]);
   return json({ status: "ok" });
+}
+
+// Manuell einen Zugang anlegen (Zahlung per Ueberweisung/Rechnung statt
+// PayPal - z.B. Feuerwehr oder Gemeinde). Legt bei Bedarf ein noch nicht mit
+// einer Anmeldung verknuepftes Kundenprofil an; die Verknuepfung mit der
+// echten Supabase-Anmeldung passiert automatisch beim ersten Login der
+// Kundin/des Kunden (siehe entscheideZugriff).
+async function adminManuellAnlegen(request, env, db) {
+  const body = await request.json().catch(() => ({}));
+  const email = normalizeEmail(body.email);
+  const tariffCode = String(body.tariff_code || "");
+  if (
+    !isValidEmail(email) ||
+    !/^[a-z0-9-]{1,40}$/.test(tariffCode)
+  ) {
+    return json({ fehler: "fehlende_oder_ungueltige_angaben" }, 400);
+  }
+
+  const tarife = await db.select(
+    "tariffs",
+    `code=eq.${filterWert(tariffCode)}&aktiv=eq.true&select=id,bezeichnung`
+  );
+  if (tarife.length === 0) return json({ fehler: "unbekannter_tarif" }, 400);
+
+  let profile = await db.select("customer_profiles", `email=eq.${filterWert(email)}&select=id,auth_user_id`);
+  let customerId;
+  if (profile.length === 0) {
+    const neu = await db.insert("customer_profiles", [{ email }]);
+    customerId = neu[0].id;
+  } else {
+    customerId = profile[0].id;
+  }
+
+  // Ein zweiter Vertrag auf dasselbe Konto wird nicht angelegt, damit hier
+  // nicht aus Versehen Doppelbuchungen entstehen.
+  const bestehend = await db.select(
+    "subscriptions",
+    `customer_id=eq.${filterWert(customerId)}&status=in.(wird_geprueft,wartet_auf_leistungsbeginn,aktiv,kulanzzeit,gekuendigt_zum_ende)&select=id&limit=1`
+  );
+  if (bestehend.length > 0) return json({ fehler: "jahreszugang_bereits_vorhanden" }, 409);
+
+  const now = new Date();
+  const performanceStart = body.leistungsbeginn ? new Date(body.leistungsbeginn) : now;
+  if (Number.isNaN(performanceStart.getTime())) return json({ fehler: "ungueltiges_datum" }, 400);
+  const contractEnd = new Date(performanceStart);
+  contractEnd.setUTCFullYear(contractEnd.getUTCFullYear() + 1);
+  const contractNumber = createContractNumber(now);
+  const zahlungsreferenz = String(body.zahlungsreferenz || "").slice(0, 300) || null;
+
+  await db.insert("subscriptions", [
+    {
+      customer_id: customerId,
+      tariff_id: tarife[0].id,
+      status: performanceStart <= now ? "aktiv" : "wartet_auf_leistungsbeginn",
+      paypal_subscription_id: null,
+      vertragsnummer: contractNumber,
+      sofortiger_beginn: performanceStart <= now,
+      leistungsbeginn_am: performanceStart.toISOString(),
+      mindestlaufzeit_bis: contractEnd.toISOString(),
+      bezahlt_bis: contractEnd.toISOString(),
+      agb_version: LEGAL_VERSION,
+      widerruf_version: LEGAL_VERSION,
+      datenschutz_version: LEGAL_VERSION,
+      notiz: zahlungsreferenz ? `Manuell angelegt (Zahlung außerhalb PayPal): ${zahlungsreferenz}` : "Manuell angelegt (Zahlung außerhalb PayPal)",
+    },
+  ]);
+
+  await db.insert("admin_actions", [
+    { admin_name: "Joerg", aktion: "manuell_angelegt", customer_id: customerId, details: `${tariffCode} / ${zahlungsreferenz || "ohne Referenz"}` },
+  ]);
+
+  const confirmation = [
+    "Vertragsbestätigung – Löschbärt",
+    "",
+    `Vertragsnummer: ${contractNumber}`,
+    `Tarif: ${tarife[0].bezeichnung}`,
+    `Leistungsbeginn: ${performanceStart.toISOString()}`,
+    `Laufzeit bis: ${contractEnd.toISOString()}`,
+    "Die Zahlung wurde außerhalb von PayPal (z.B. per Überweisung/Rechnung) erhalten und manuell verbucht.",
+    "",
+    "Zugang: Bitte auf der Nutzerseite mit dieser E-Mail-Adresse anmelden (Anmelde-Link per E-Mail).",
+    "Kontakt: wasserentnahme-foehr@web.de",
+  ].join("\n");
+  await nachrichtVormerken(db, env, {
+    customerId,
+    to: email,
+    subject: `Vertragsbestätigung ${contractNumber}`,
+    text: confirmation,
+  });
+
+  return json({ status: "angelegt", vertragsnummer: contractNumber, leistungsbeginn_am: performanceStart.toISOString() });
 }
