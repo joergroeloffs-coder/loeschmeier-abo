@@ -58,6 +58,26 @@ export function calculateProRataRefund({ amountCents, periodStart, periodEnd, ef
   return Math.min(amountCents, Math.round(amountCents * unused / (end - start)));
 }
 
+// Erzeugt eine einfache, lesbare HTML-Fassung aus dem Klartext, damit die
+// Mail nicht als unformatierte Textwand ankommt. Der Klartext bleibt die
+// massgebliche Quelle (beide Fassungen zeigen denselben Inhalt) - es wird
+// nur Zeilenumbruch, Absatzabstand und anklickbare Links ergaenzt.
+function textZuEinfachemHtml(text) {
+  const escaped = String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const mitLinks = escaped.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    (url) => `<a href="${url}" style="color:#1a73c7">${url}</a>`
+  );
+  const absaetze = mitLinks
+    .split(/\n{2,}/)
+    .map((absatz) => `<p style="margin:0 0 14px">${absatz.replace(/\n/g, "<br>")}</p>`)
+    .join("\n");
+  return `<!doctype html><html lang="de"><body style="font:15px/1.55 system-ui,sans-serif;color:#1a1f26;max-width:640px;margin:0 auto;padding:20px">${absaetze}</body></html>`;
+}
+
 export async function sendTextEmail(env, { to, subject, text, idempotencyKey }) {
   if (!env.RESEND_API_KEY || !env.TRANSACTIONAL_FROM) {
     throw new Error("Transaktions-E-Mail ist nicht konfiguriert");
@@ -74,6 +94,7 @@ export async function sendTextEmail(env, { to, subject, text, idempotencyKey }) 
       to: [to],
       subject,
       text,
+      html: textZuEinfachemHtml(text),
     }),
   });
   if (!response.ok) {

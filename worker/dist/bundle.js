@@ -233,6 +233,26 @@ function calculateProRataRefund({ amountCents, periodStart, periodEnd, effective
   return Math.min(amountCents, Math.round(amountCents * unused / (end - start)));
 }
 
+// Erzeugt eine einfache, lesbare HTML-Fassung aus dem Klartext, damit die
+// Mail nicht als unformatierte Textwand ankommt. Der Klartext bleibt die
+// massgebliche Quelle (beide Fassungen zeigen denselben Inhalt) - es wird
+// nur Zeilenumbruch, Absatzabstand und anklickbare Links ergaenzt.
+function textZuEinfachemHtml(text) {
+  const escaped = String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const mitLinks = escaped.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    (url) => `<a href="${url}" style="color:#1a73c7">${url}</a>`
+  );
+  const absaetze = mitLinks
+    .split(/\n{2,}/)
+    .map((absatz) => `<p style="margin:0 0 14px">${absatz.replace(/\n/g, "<br>")}</p>`)
+    .join("\n");
+  return `<!doctype html><html lang="de"><body style="font:15px/1.55 system-ui,sans-serif;color:#1a1f26;max-width:640px;margin:0 auto;padding:20px">${absaetze}</body></html>`;
+}
+
 async function sendTextEmail(env, { to, subject, text, idempotencyKey }) {
   if (!env.RESEND_API_KEY || !env.TRANSACTIONAL_FROM) {
     throw new Error("Transaktions-E-Mail ist nicht konfiguriert");
@@ -249,6 +269,7 @@ async function sendTextEmail(env, { to, subject, text, idempotencyKey }) {
       to: [to],
       subject,
       text,
+      html: textZuEinfachemHtml(text),
     }),
   });
   if (!response.ok) {
@@ -1231,7 +1252,7 @@ async function aboAnlegen(request, env) {
     `Vertragsschluss: ${now.toISOString()}`,
     `Leistungsbeginn: ${performanceStart.toISOString()}`,
     `Mindestlaufzeit bis: ${contractEnd.toISOString()}`,
-    "Danach verlängert sich der Vertrag auf unbestimmte Zeit. Die Vergütung von 12,00 EUR wird jeweils für zwölf Monate im Voraus berechnet. Ab Ende der Mindestlaufzeit kann jederzeit gekündigt werden; ungenutzte vorausbezahlte Restzeit wird anteilig erstattet.",
+    "Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird. Die Vergütung von 12,00 EUR wird jeweils für zwölf Monate im Voraus berechnet. Für eine ordentliche Kündigung erfolgt keine anteilige Erstattung; das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
     `Rechtstexte-Version: ${LEGAL_VERSION}`,
     body.sofortiger_beginn
       ? "Sie haben ausdrücklich verlangt, dass die Leistung vor Ablauf der Widerrufsfrist beginnt."
@@ -1248,7 +1269,7 @@ async function aboAnlegen(request, env) {
     `Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie ${basisUrl(env)}/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.`,
     "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschbärt Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
     "",
-    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag unbefristet weiter und kann jederzeit beendet werden; für ungenutzte vorausbezahlte Restzeit erfolgt eine anteilige Erstattung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
+    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird; für eine ordentliche Kündigung erfolgt keine anteilige Erstattung. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
     `Zusätzliche lesbare Fassung: ${basisUrl(env)}/agb.html`,
     `Datenschutz: ${basisUrl(env)}/datenschutz.html`,
   ].join("\n");
