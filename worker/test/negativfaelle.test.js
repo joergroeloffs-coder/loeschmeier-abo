@@ -479,6 +479,63 @@ test("Widerruf: Eingang bleibt erhalten, wenn die Erstattung scheitert", async (
   assert.equal(daten.payments[0].status, "erfolgreich");
 });
 
+test("Widerruf nach Ablauf der 14-Tage-Frist wird nicht automatisch erstattet", async () => {
+  const vertragsschluss = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000); // vor 20 Tagen
+  const { umgebung, daten, protokoll } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", erstellt_am: vertragsschluss.toISOString(),
+      }],
+      payments: [{ id: "zahl-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "SALE-1", betrag_cent: 1200 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/widerrufen", {
+      methode: "POST",
+      koerper: {
+        name: "Max Mustermann", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "widerrufsfrist_abgelaufen");
+  // Nichts automatisch veraendert: kein Vertragsstatus-Wechsel, keine
+  // Erstattung, kein PayPal-Aufruf zur Kuendigung.
+  assert.equal(daten.subscriptions[0].status, "aktiv");
+  assert.equal(daten.payments[0].status, "erfolgreich");
+  assert.ok(!protokoll.paypalAufrufe.some((a) => a.includes("cancel")));
+});
+
+test("Widerruf innerhalb der 14-Tage-Frist wird weiterhin automatisch erstattet", async () => {
+  const vertragsschluss = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000); // vor 5 Tagen
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", erstellt_am: vertragsschluss.toISOString(),
+      }],
+      payments: [{ id: "zahl-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "SALE-1", betrag_cent: 1200 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/widerrufen", {
+      methode: "POST",
+      koerper: {
+        name: "Max Mustermann", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "erstattet");
+  assert.equal(daten.subscriptions[0].status, "erstattet");
+  assert.equal(daten.payments[0].status, "erstattet");
+});
+
 test("E-Mail-Ausfall: Erklaerung gilt trotzdem und bleibt zum erneuten Senden vorgemerkt", async () => {
   const { umgebung, daten } = baueUmgebung({ emailFehler: true });
   const worker = await ladeWorker(umgebung);

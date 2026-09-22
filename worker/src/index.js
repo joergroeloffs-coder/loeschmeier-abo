@@ -267,7 +267,7 @@ async function rechtserklaerung(request, env, type) {
       customerId = profiles[0].id;
       const subscriptions = await db.select(
         "subscriptions",
-        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis`
+        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am`
       );
       // Die Vertragsreferenz muss zu genau dem Konto gehoeren, dessen
       // E-Mail-Adresse angegeben wurde. Sonst bleibt es bei manueller Pruefung.
@@ -277,7 +277,18 @@ async function rechtserklaerung(request, env, type) {
     }
     if (subscription) processingStatus = "zugeordnet";
 
-    if (subscription) {
+    // Das gesetzliche Widerrufsrecht besteht vierzehn Tage ab Vertragsschluss
+    // (§ 355 BGB). Danach automatisch zu erstatten waere falsch - der Anbieter
+    // ist dazu nicht mehr verpflichtet. Nach Fristablauf daher keine
+    // automatische Erstattung/PayPal-Kuendigung, sondern manuelle Pruefung
+    // (der Betreiber kann eine spaete Erklaerung z.B. als Kulanz annehmen).
+    const widerrufsfristAbgelaufen =
+      type === "widerruf" && subscription?.erstellt_am &&
+      new Date(now).getTime() - new Date(subscription.erstellt_am).getTime() > 14 * 24 * 60 * 60 * 1000;
+
+    if (subscription && widerrufsfristAbgelaufen) {
+      processingStatus = "widerrufsfrist_abgelaufen";
+    } else if (subscription) {
       if (type === "kuendigung") {
         const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd, data.declarationKind);
         effectiveAt = result.effectiveAt;

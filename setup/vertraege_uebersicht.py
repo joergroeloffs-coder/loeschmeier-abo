@@ -48,6 +48,7 @@ VERARBEITUNG_TEXT = {
     "eingegangen": "Eingegangen, wird noch verarbeitet",
     "zugeordnet": "Zugeordnet, verarbeitet",
     "manuelle_pruefung": "Nicht automatisch zugeordnet - bitte prüfen",
+    "widerrufsfrist_abgelaufen": "14-Tage-Frist abgelaufen - keine automatische Erstattung, bitte prüfen",
     "paypal_pruefung_noetig": "PayPal-Kündigung fehlgeschlagen - bitte prüfen",
     "erstattung_manuell_pruefen": "Erstattung fehlgeschlagen - bitte prüfen",
     "anteilig_erstattet": "Anteilig erstattet",
