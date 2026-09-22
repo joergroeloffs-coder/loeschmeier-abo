@@ -1530,6 +1530,9 @@ async function adminAnfrage(request, env, url) {
   if (pfad === "/api/admin/entsperren" && request.method === "POST") {
     return await adminAktion(request, env, db, "entsperren", { manuell_gesperrt: false });
   }
+  if (pfad === "/api/admin/bearbeiten" && request.method === "POST") {
+    return await adminBearbeiten(request, env, db);
+  }
   if (pfad === "/api/admin/kulanz-verlaengern" && request.method === "POST") {
     const body = await request.json().catch(() => ({}));
     const tage = parseInt(body.tage || "3", 10);
@@ -1587,6 +1590,37 @@ async function adminAktion(request, env, db, aktionsName, patch) {
       aktion: aktionsName,
       subscription_id: body.subscription_id,
       details: body.notiz || null,
+    },
+  ]);
+  return json({ status: "ok" });
+}
+
+// Nachtraegliches Bearbeiten eines bestehenden Vertrags: Notiz und/oder
+// Bezahlt-bis-Datum aendern. Nur die tatsaechlich mitgeschickten Felder
+// werden angefasst, damit ein leer gelassenes Feld nichts loescht.
+async function adminBearbeiten(request, env, db) {
+  const body = await request.json().catch(() => ({}));
+  if (!istUuid(body.subscription_id)) return json({ fehler: "fehlende_angaben" }, 400);
+
+  const patch = {};
+  if (typeof body.notiz === "string") patch.notiz = body.notiz.slice(0, 500) || null;
+  if (typeof body.bezahlt_bis === "string" && body.bezahlt_bis) {
+    const datum = new Date(body.bezahlt_bis);
+    if (Number.isNaN(datum.getTime())) return json({ fehler: "ungueltiges_datum" }, 400);
+    patch.bezahlt_bis = datum.toISOString();
+  }
+  if (Object.keys(patch).length === 0) return json({ fehler: "nichts_zu_aendern" }, 400);
+
+  await db.update("subscriptions", `id=eq.${filterWert(body.subscription_id)}`, {
+    ...patch,
+    aktualisiert_am: new Date().toISOString(),
+  });
+  await db.insert("admin_actions", [
+    {
+      admin_name: "Joerg",
+      aktion: "bearbeitet",
+      subscription_id: body.subscription_id,
+      details: JSON.stringify(patch),
     },
   ]);
   return json({ status: "ok" });

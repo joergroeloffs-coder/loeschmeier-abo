@@ -163,6 +163,7 @@
 
     const kundenRes = await adminFetch("/api/admin/kunden");
     const kunden = await kundenRes.json();
+    AKTUELLE_KUNDEN = kunden;
     document.getElementById("kunden-tabelle").innerHTML = kunden.map(k => {
       const [text, art] = STATUS_TEXT[k.status] || [k.status, "warnung"];
       return `
@@ -179,10 +180,31 @@
               : `<button class="klein gefahr" onclick="sperren('${k.id}')">Sperren</button>`
             }
             <button class="klein" onclick="kulanzVerlaengern('${k.id}')">+3 Tage Kulanz</button>
+            <button class="klein" onclick="bearbeiten('${k.id}')">Bearbeiten</button>
           </td>
         </tr>
       `;
     }).join("");
+  }
+
+  let AKTUELLE_KUNDEN = [];
+  async function bearbeiten(id){
+    const kunde = AKTUELLE_KUNDEN.find(k => k.id === id);
+    if(!kunde) return;
+    const neueNotiz = prompt("Notiz (leer lassen = löschen):", kunde.notiz || "");
+    if(neueNotiz === null) return; // Abbrechen gedrückt
+    const aktuellesBezahltBis = kunde.bezahlt_bis ? kunde.bezahlt_bis.slice(0, 10) : "";
+    const neuesDatum = prompt("Bezahlt bis (JJJJ-MM-TT, leer lassen = unverändert):", aktuellesBezahltBis);
+    if(neuesDatum === null) return;
+    const body = { subscription_id: id, notiz: neueNotiz };
+    if(neuesDatum.trim()) body.bezahlt_bis = neuesDatum.trim();
+    const res = await adminFetch("/api/admin/bearbeiten", { method: "POST", body: JSON.stringify(body) });
+    if(!res.ok){
+      const daten = await res.json();
+      alert("Fehler: " + (daten.fehler || res.status));
+      return;
+    }
+    ladeAlles();
   }
 
   document.getElementById("ma-anlegen-btn").addEventListener("click", async () => {

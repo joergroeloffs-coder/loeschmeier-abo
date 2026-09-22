@@ -815,3 +815,33 @@ test("Erstes Login verknuepft ein manuell angelegtes Profil automatisch mit der 
   assert.equal(ergebnis.erlaubt, true);
   assert.equal(daten.customer_profiles[0].auth_user_id, "user-1", "wird beim ersten Zugriff automatisch verknuepft");
 });
+
+test("Admin: Notiz und Bezahlt-bis-Datum eines bestehenden Vertrags bearbeiten", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      subscriptions: [{ id: "11111111-1111-4111-8111-111111111111", status: "aktiv", notiz: "alt", bezahlt_bis: "2027-01-01T00:00:00.000Z" }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/bearbeiten", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111", notiz: "neu", bezahlt_bis: "2027-06-15" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.subscriptions[0].notiz, "neu");
+  assert.equal(daten.subscriptions[0].bezahlt_bis, "2027-06-15T00:00:00.000Z");
+});
+
+test("Admin: Bearbeiten ohne gueltige subscription_id abgelehnt", async () => {
+  const { umgebung } = baueUmgebung();
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/bearbeiten", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ notiz: "neu" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 400);
+});
