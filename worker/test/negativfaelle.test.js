@@ -868,3 +868,203 @@ test("Admin: manueller Gemeinde-Zugang (monatlich) bekommt 1 Monat Laufzeit und 
   assert.notEqual(abo.agb_version, "2026-09-21", "nutzt nicht die Privatkunden-AGB-Version");
   assert.equal(abo.widerruf_version, null, "kein Verbraucher-Widerrufsrecht fuer Organisationen");
 });
+
+// ---- Admin: Kuendigung/Widerruf manuell ausloesen, Geraete zuruecksetzen,
+// Vertrag loeschen ----
+
+test("Admin: Kuendigung manuell ausloesen wendet dieselben Regeln an wie das oeffentliche Formular", async () => {
+  const paidUntil = new Date(Date.now() + 200 * 24 * 60 * 60 * 1000);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "11111111-1111-4111-8111-111111111111", customer_id: "kunde-1", status: "aktiv",
+        vertragsnummer: "LB-2026-ABC", bezahlt_bis: paidUntil.toISOString(), mindestlaufzeit_bis: paidUntil.toISOString(),
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerung-ausloesen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111", typ: "kuendigung", erklaerungsart: "ordentlich" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const ergebnis = await antwort.json();
+  assert.equal(ergebnis.verarbeitungsstatus, "zugeordnet");
+  assert.equal(ergebnis.wirksam_zum, paidUntil.toISOString());
+  assert.equal(daten.subscriptions[0].status, "gekuendigt_zum_ende");
+  assert.equal(daten.legal_declarations.length, 1, "Vorgang wird wie beim oeffentlichen Formular protokolliert");
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "zugeordnet");
+});
+
+test("Admin: Gemeinde-Vertrag (monatlich) wird bei Kuendigung mit 2-Wochen-Frist und Monatsschritt verlaengert, nicht mit Jahresschritt", async () => {
+  const paidUntil = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000); // in 5 Tagen, zu spaet fuer 2 Wochen
+  const erwartet = new Date(paidUntil);
+  erwartet.setUTCMonth(erwartet.getUTCMonth() + 1);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "feuerwehr@example.test" }],
+      subscriptions: [{
+        id: "11111111-1111-4111-8111-111111111111", customer_id: "kunde-1", status: "aktiv",
+        vertragsnummer: "LB-2026-GEM", bezahlt_bis: paidUntil.toISOString(), mindestlaufzeit_bis: paidUntil.toISOString(),
+        tariffs: { intervall: "monatlich", zielgruppe: "organisation" },
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerung-ausloesen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111", typ: "kuendigung", erklaerungsart: "ordentlich" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const ergebnis = await antwort.json();
+  assert.equal(ergebnis.wirksam_zum, erwartet.toISOString(), "verlaengert um genau einen Monat, nicht ein Jahr");
+});
+
+test("Admin: Widerruf fuer Organisation wird abgelehnt (kein gesetzliches Widerrufsrecht)", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "feuerwehr@example.test" }],
+      subscriptions: [{
+        id: "11111111-1111-4111-8111-111111111111", customer_id: "kunde-1", status: "aktiv",
+        vertragsnummer: "LB-2026-GEM", erstellt_am: new Date().toISOString(),
+        tariffs: { intervall: "monatlich", zielgruppe: "organisation" },
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerung-ausloesen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111", typ: "widerruf" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const ergebnis = await antwort.json();
+  assert.equal(ergebnis.verarbeitungsstatus, "kein_widerrufsrecht_organisation");
+  // Der Vertrag bleibt unveraendert aktiv - kein automatischer Abbruch.
+  assert.equal(daten.subscriptions[0].status, "aktiv");
+});
+
+test("Admin: Widerruf nach Ablauf der 14-Tage-Frist auch bei manuellem Ausloesen nicht automatisch erstattet", async () => {
+  const vertragsschluss = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "11111111-1111-4111-8111-111111111111", customer_id: "kunde-1", status: "aktiv",
+        vertragsnummer: "LB-2026-ABC", paypal_subscription_id: "I-ABC", erstellt_am: vertragsschluss.toISOString(),
+      }],
+      payments: [{ id: "zahl-1", subscription_id: "11111111-1111-4111-8111-111111111111", status: "erfolgreich", paypal_capture_id: "SALE-1", betrag_cent: 1200 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerung-ausloesen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111", typ: "widerruf" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  const ergebnis = await antwort.json();
+  assert.equal(ergebnis.verarbeitungsstatus, "widerrufsfrist_abgelaufen");
+  assert.equal(daten.subscriptions[0].status, "aktiv");
+  assert.equal(daten.payments[0].status, "erfolgreich");
+});
+
+test("Admin: Ausloesen ohne gueltige subscription_id oder Typ abgelehnt", async () => {
+  const { umgebung } = baueUmgebung();
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerung-ausloesen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 400);
+});
+
+test("Admin: Ausloesen ohne Passwort abgelehnt", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "11111111-1111-4111-8111-111111111111", status: "aktiv" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/admin/erklaerung-ausloesen", {
+      methode: "POST",
+      koerper: { subscription_id: "11111111-1111-4111-8111-111111111111", typ: "kuendigung" },
+    }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 401);
+  assert.equal(daten.subscriptions[0].status, "aktiv", "ohne Passwort bleibt nichts veraendert");
+});
+
+test("Admin: Vertrag loeschen entfernt die Vertragszeile und protokolliert die Aktion", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", email: "kunde@example.test" }],
+      subscriptions: [
+        { id: "11111111-1111-4111-8111-111111111111", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC" },
+        { id: "22222222-2222-4222-8222-222222222222", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-XYZ" },
+      ],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "11111111-1111-4111-8111-111111111111" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.subscriptions.length, 1, "nur der gewaehlte Vertrag wird geloescht");
+  assert.equal(daten.subscriptions[0].id, "22222222-2222-4222-8222-222222222222");
+  assert.ok(daten.admin_actions.some((a) => a.aktion === "vertrag_geloescht"));
+});
+
+test("Admin: Vertrag loeschen ohne Passwort abgelehnt", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "11111111-1111-4111-8111-111111111111", status: "aktiv" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/admin/loeschen", {
+      methode: "POST",
+      koerper: { subscription_id: "11111111-1111-4111-8111-111111111111" },
+    }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 401);
+  assert.equal(daten.subscriptions.length, 1, "ohne Passwort bleibt der Vertrag bestehen");
+});
+
+test("Admin: Vertrag loeschen mit unbekannter Kennung liefert 404", async () => {
+  const { umgebung } = baueUmgebung();
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: "99999999-9999-4999-8999-999999999999" }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 404);
+});
+
+test("Admin: Erklaerungen-Liste liefert Kuendigungen/Widerrufe fuer die Uebersicht", async () => {
+  const { umgebung } = baueUmgebung({
+    tabellen: {
+      legal_declarations: [
+        { id: "e1", typ: "widerruf", vertragsreferenz: "LB-2026-ABC", email: "kunde@example.test", eingegangen_am: new Date().toISOString(), verarbeitungsstatus: "erstattet", zugeordnet: true },
+      ],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/erklaerungen", {
+    headers: { "X-Admin-Passwort": "geheim" },
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const liste = await antwort.json();
+  assert.equal(liste.length, 1);
+  assert.equal(liste[0].verarbeitungsstatus, "erstattet");
+});

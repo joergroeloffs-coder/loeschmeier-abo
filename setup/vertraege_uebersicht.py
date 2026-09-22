@@ -57,6 +57,7 @@ VERARBEITUNG_TEXT = {
     "manuelle_pruefung": "Nicht automatisch zugeordnet - bitte prüfen",
     "widerrufsfrist_abgelaufen": "14-Tage-Frist abgelaufen - keine automatische Erstattung, bitte prüfen",
     "vertrag_bereits_beendet": "Vertrag war schon beendet - nichts erneut verändert",
+    "kein_widerrufsrecht_organisation": "Organisation ohne gesetzliches Widerrufsrecht - Vertrag unverändert",
     "paypal_pruefung_noetig": "PayPal-Kündigung fehlgeschlagen - bitte prüfen",
     "erstattung_manuell_pruefen": "Erstattung fehlgeschlagen - bitte prüfen",
     "anteilig_erstattet": "Anteilig erstattet",

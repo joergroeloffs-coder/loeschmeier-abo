@@ -275,7 +275,7 @@ async function rechtserklaerung(request, env, type) {
       customerId = profiles[0].id;
       const subscriptions = await db.select(
         "subscriptions",
-        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am,kuendigungswirksam_am`
+        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am,kuendigungswirksam_am,tariffs(intervall,zielgruppe)`
       );
       // Die Vertragsreferenz muss zu genau dem Konto gehoeren, dessen
       // E-Mail-Adresse angegeben wurde. Sonst bleibt es bei manueller Pruefung.
@@ -285,67 +285,14 @@ async function rechtserklaerung(request, env, type) {
     }
     if (subscription) processingStatus = "zugeordnet";
 
-    // Das gesetzliche Widerrufsrecht besteht vierzehn Tage ab Vertragsschluss
-    // (§ 355 BGB). Danach automatisch zu erstatten waere falsch - der Anbieter
-    // ist dazu nicht mehr verpflichtet. Nach Fristablauf daher keine
-    // automatische Erstattung/PayPal-Kuendigung, sondern manuelle Pruefung
-    // (der Betreiber kann eine spaete Erklaerung z.B. als Kulanz annehmen).
-    const widerrufsfristAbgelaufen =
-      type === "widerruf" && subscription?.erstellt_am &&
-      new Date(now).getTime() - new Date(subscription.erstellt_am).getTime() > 14 * 24 * 60 * 60 * 1000;
-
-    if (subscription && widerrufsfristAbgelaufen) {
-      processingStatus = "widerrufsfrist_abgelaufen";
-    } else if (subscription) {
-      if (type === "kuendigung") {
-        const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd, data.declarationKind);
-        effectiveAt = result.effectiveAt;
-        processingStatus = result.processingStatus;
-        cancellationRefundCents = result.refundedCents;
-      } else if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
-        const cancelled = await kuendigeAbo(
-          env,
-          subscription.paypal_subscription_id,
-          "Widerruf durch Kunden"
-        );
-        if (!cancelled) processingStatus = "paypal_pruefung_noetig";
-      }
-      if (type === "widerruf" && ["erstattet", "widerrufen"].includes(subscription.status)) {
-        // Bereits erledigt (z.B. Doppel-Einreichung) - nichts erneut
-        // ueberschreiben, insbesondere "erstattet" nicht faelschlich
-        // wieder auf "widerrufen" zuruecksetzen.
-        processingStatus = "vertrag_bereits_beendet";
-        effectiveAt = subscription.kuendigungswirksam_am || now;
-      } else if (type === "widerruf") {
-        const payments = await db.select(
-          "payments",
-          `subscription_id=eq.${filterWert(subscription.id)}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
-        );
-        if (payments.length > 0 && payments[0].paypal_capture_id) {
-          try {
-            await erstatteZahlung(env, payments[0].paypal_capture_id);
-            await db.update("payments", `id=eq.${filterWert(payments[0].id)}`, {
-              status: "erstattet",
-              erstattet_cent: payments[0].betrag_cent,
-              erstattet_am: now,
-            });
-            refunded = true;
-            processingStatus = "erstattet";
-          } catch (error) {
-            console.error("Automatische Widerrufserstattung fehlgeschlagen", error);
-            processingStatus = "erstattung_manuell_pruefen";
-          }
-        } else {
-          processingStatus = "keine_zahlung_gefunden";
-        }
-        effectiveAt = now;
-        await db.update("subscriptions", `id=eq.${filterWert(subscription.id)}`, {
-          status: refunded ? "erstattet" : "widerrufen",
-          gekuendigt_am: now,
-          kuendigungswirksam_am: now,
-          aktualisiert_am: now,
-        });
-      }
+    if (subscription) {
+      const ergebnis = await verarbeiteZugeordneteErklaerung(
+        db, env, type, subscription, data.declarationKind, data.requestedEnd, now
+      );
+      processingStatus = ergebnis.processingStatus;
+      effectiveAt = ergebnis.effectiveAt;
+      cancellationRefundCents = ergebnis.cancellationRefundCents;
+      refunded = ergebnis.refunded;
     }
   } catch (error) {
     // Der Eingang steht bereits in der Datenbank. Die Erklaerung gilt damit
@@ -412,6 +359,89 @@ async function rechtserklaerung(request, env, type) {
 }
 
 const SECHS_WOCHEN_MS = 6 * 7 * 24 * 60 * 60 * 1000;
+const ZWEI_WOCHEN_MS = 2 * 7 * 24 * 60 * 60 * 1000;
+
+// Gemeinsame Verarbeitung einer einer Vertragsnummer zugeordneten Kuendigung
+// oder eines Widerrufs - genutzt vom oeffentlichen Formular UND vom manuellen
+// Ausloesen im Admin-Bereich, damit beide Wege exakt dieselben Regeln anwenden.
+async function verarbeiteZugeordneteErklaerung(db, env, type, subscription, declarationKind, requestedEnd, now) {
+  const istOrganisation = subscription.tariffs?.zielgruppe === "organisation";
+
+  if (type === "kuendigung") {
+    const result = await kuendigungVerarbeiten(db, env, subscription, requestedEnd, declarationKind);
+    return {
+      processingStatus: result.processingStatus,
+      effectiveAt: result.effectiveAt,
+      cancellationRefundCents: result.refundedCents,
+      refunded: false,
+    };
+  }
+
+  // Organisationen (Gemeinden/Feuerwehren) sind keine Verbraucher (§ 13 BGB) -
+  // fuer sie besteht kein gesetzliches Widerrufsrecht (Gemeinde-AGB Ziffer 6).
+  if (istOrganisation) {
+    return { processingStatus: "kein_widerrufsrecht_organisation", effectiveAt: null, cancellationRefundCents: 0, refunded: false };
+  }
+
+  let processingStatus = "zugeordnet";
+  let effectiveAt = null;
+  let refunded = false;
+
+  // Das gesetzliche Widerrufsrecht besteht vierzehn Tage ab Vertragsschluss
+  // (§ 355 BGB). Danach automatisch zu erstatten waere falsch - der Anbieter
+  // ist dazu nicht mehr verpflichtet. Nach Fristablauf daher keine
+  // automatische Erstattung/PayPal-Kuendigung, sondern manuelle Pruefung
+  // (der Betreiber kann eine spaete Erklaerung z.B. als Kulanz annehmen).
+  const widerrufsfristAbgelaufen = subscription.erstellt_am &&
+    new Date(now).getTime() - new Date(subscription.erstellt_am).getTime() > 14 * 24 * 60 * 60 * 1000;
+  if (widerrufsfristAbgelaufen) {
+    return { processingStatus: "widerrufsfrist_abgelaufen", effectiveAt: null, cancellationRefundCents: 0, refunded: false };
+  }
+
+  if (subscription.paypal_subscription_id && !["abgelaufen", "widerrufen", "erstattet"].includes(subscription.status)) {
+    const cancelled = await kuendigeAbo(env, subscription.paypal_subscription_id, "Widerruf durch Kunden");
+    if (!cancelled) processingStatus = "paypal_pruefung_noetig";
+  }
+
+  if (["erstattet", "widerrufen"].includes(subscription.status)) {
+    // Bereits erledigt (z.B. Doppel-Einreichung) - nichts erneut
+    // ueberschreiben, insbesondere "erstattet" nicht faelschlich
+    // wieder auf "widerrufen" zuruecksetzen.
+    processingStatus = "vertrag_bereits_beendet";
+    effectiveAt = subscription.kuendigungswirksam_am || now;
+    return { processingStatus, effectiveAt, cancellationRefundCents: 0, refunded: false };
+  }
+
+  const payments = await db.select(
+    "payments",
+    `subscription_id=eq.${filterWert(subscription.id)}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
+  );
+  if (payments.length > 0 && payments[0].paypal_capture_id) {
+    try {
+      await erstatteZahlung(env, payments[0].paypal_capture_id);
+      await db.update("payments", `id=eq.${filterWert(payments[0].id)}`, {
+        status: "erstattet",
+        erstattet_cent: payments[0].betrag_cent,
+        erstattet_am: now,
+      });
+      refunded = true;
+      processingStatus = "erstattet";
+    } catch (error) {
+      console.error("Automatische Widerrufserstattung fehlgeschlagen", error);
+      processingStatus = "erstattung_manuell_pruefen";
+    }
+  } else {
+    processingStatus = "keine_zahlung_gefunden";
+  }
+  effectiveAt = now;
+  await db.update("subscriptions", `id=eq.${filterWert(subscription.id)}`, {
+    status: refunded ? "erstattet" : "widerrufen",
+    gekuendigt_am: now,
+    kuendigungswirksam_am: now,
+    aktualisiert_am: now,
+  });
+  return { processingStatus, effectiveAt, cancellationRefundCents: 0, refunded };
+}
 
 async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null, declarationKind = "ordentlich") {
   // Ein bereits beendeter Vertrag (erstattet/widerrufen/abgelaufen) darf durch
@@ -426,6 +456,13 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     };
   }
   const now = new Date();
+  // Organisationen (Gemeinden/Feuerwehren) haben eine eigene, monatliche
+  // Laufzeit und eine kuerzere Kuendigungsfrist als Privatkunden - siehe
+  // Gemeinde-AGB Ziffer 5 (1 Monat Mindestlaufzeit, 2 Wochen Frist zum
+  // Monatsende) statt Ziffer 5 der Privatkunden-AGB (12 Monate, 6 Wochen).
+  const istOrganisation = subscription.tariffs?.zielgruppe === "organisation";
+  const periodenMonate = subscription.tariffs?.intervall === "monatlich" ? 1 : 12;
+  const vorlaufMs = istOrganisation ? ZWEI_WOCHEN_MS : SECHS_WOCHEN_MS;
   const minimumEnd = subscription.mindestlaufzeit_bis
     ? new Date(subscription.mindestlaufzeit_bis)
     : new Date(subscription.bezahlt_bis || now);
@@ -435,19 +472,18 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
   const refundEligible = declarationKind === "ausserordentlich";
   if (refundEligible) {
     // Ausserordentliche Kuendigung aus wichtigem Grund wirkt sofort,
-    // unabhaengig von Mindestlaufzeit und Sechs-Wochen-Frist.
+    // unabhaengig von Mindestlaufzeit und Kuendigungsfrist.
     effective = now;
     if (requestedEnd && requestedEnd > effective && requestedEnd < paidUntil) effective = requestedEnd;
   } else {
     // Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
-    // fruehestens zum Ende der Mindestlaufzeit. Liegen zwischen jetzt und
-    // diesem Zeitpunkt weniger als sechs Wochen, verlaengert sich der
-    // Vertrag noch um ein weiteres Jahr (naechster Kuendigungstermin) -
-    // siehe AGB Ziffer 5.
+    // fruehestens zum Ende der Mindestlaufzeit. Liegt zwischen jetzt und
+    // diesem Zeitpunkt weniger Vorlauf als die Kuendigungsfrist, verlaengert
+    // sich der Vertrag noch um eine weitere Periode (naechster Termin).
     let naechstesEnde = paidUntil < minimumEnd ? minimumEnd : paidUntil;
-    while (naechstesEnde.getTime() - now.getTime() < SECHS_WOCHEN_MS) {
+    while (naechstesEnde.getTime() - now.getTime() < vorlaufMs) {
       const weiter = new Date(naechstesEnde);
-      weiter.setUTCFullYear(weiter.getUTCFullYear() + 1);
+      weiter.setUTCMonth(weiter.getUTCMonth() + periodenMonate);
       naechstesEnde = weiter;
     }
     effective = naechstesEnde;
@@ -1236,9 +1272,16 @@ async function adminAnfrage(request, env, url) {
   if (pfad === "/api/admin/kunden" && request.method === "GET") {
     const kunden = await db.select(
       "subscriptions",
-      "select=id,status,beginn,naechste_zahlung,bezahlt_bis,gekuendigt_am,manuell_gesperrt,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent)&order=erstellt_am.desc"
+      "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent,intervall,zielgruppe)&order=erstellt_am.desc"
     );
     return json(kunden);
+  }
+  if (pfad === "/api/admin/erklaerungen" && request.method === "GET") {
+    const erklaerungen = await db.select(
+      "legal_declarations",
+      "select=id,typ,vertragsreferenz,email,eingegangen_am,verarbeitungsstatus,zugeordnet,wirksam_zum&order=eingegangen_am.desc&limit=50"
+    );
+    return json(erklaerungen);
   }
   if (pfad === "/api/admin/sperren" && request.method === "POST") {
     return await adminAktion(request, env, db, "sperren", { manuell_gesperrt: true });
@@ -1265,6 +1308,12 @@ async function adminAnfrage(request, env, url) {
     const body = await request.json().catch(() => ({}));
     if (!istUuid(body.customer_id)) return json({ fehler: "fehlende_angaben" }, 400);
     return await adminGeraeteZuruecksetzen(env, db, body.customer_id);
+  }
+  if (pfad === "/api/admin/erklaerung-ausloesen" && request.method === "POST") {
+    return await adminErklaerungAusloesen(request, env, db);
+  }
+  if (pfad === "/api/admin/loeschen" && request.method === "POST") {
+    return await adminLoeschen(request, env, db);
   }
 
   return json({ fehler: "unbekannter_admin_pfad" }, 404);
@@ -1451,4 +1500,109 @@ async function adminManuellAnlegen(request, env, db) {
   });
 
   return json({ status: "angelegt", vertragsnummer: contractNumber, leistungsbeginn_am: performanceStart.toISOString() });
+}
+
+// Kuendigung oder Widerruf manuell im Admin-Bereich ausloesen - z.B. wenn
+// eine Gemeinde/Feuerwehr telefonisch oder per E-Mail (statt ueber das
+// oeffentliche Formular) kuendigt. Nutzt exakt dieselbe Verarbeitung wie das
+// oeffentliche Formular (verarbeiteZugeordneteErklaerung), damit dieselben
+// Regeln gelten (Mindestlaufzeit, Kuendigungsfrist, 14-Tage-Widerrufsfrist,
+// kein Widerrufsrecht fuer Organisationen).
+async function adminErklaerungAusloesen(request, env, db) {
+  const body = await request.json().catch(() => ({}));
+  const type = body.typ === "widerruf" ? "widerruf" : body.typ === "kuendigung" ? "kuendigung" : null;
+  if (!istUuid(body.subscription_id) || !type) return json({ fehler: "fehlende_angaben" }, 400);
+  const declarationKind = body.erklaerungsart === "ausserordentlich" ? "ausserordentlich" : "ordentlich";
+  let requestedEnd = null;
+  if (typeof body.gewuenschtes_ende === "string" && body.gewuenschtes_ende) {
+    requestedEnd = new Date(body.gewuenschtes_ende);
+    if (Number.isNaN(requestedEnd.getTime())) return json({ fehler: "ungueltiges_datum" }, 400);
+  }
+
+  const treffer = await db.select(
+    "subscriptions",
+    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am,kuendigungswirksam_am,customer_id,tariffs(intervall,zielgruppe),customer_profiles(email)`
+  );
+  if (treffer.length === 0) return json({ fehler: "unbekannter_vertrag" }, 404);
+  const subscription = treffer[0];
+  const email = subscription.customer_profiles?.email || null;
+  const now = new Date().toISOString();
+
+  const rows = await db.insert("legal_declarations", [{
+    typ: type,
+    name: "Admin-Bereich",
+    email,
+    vertragsreferenz: subscription.vertragsnummer || subscription.id,
+    erklaerungsart: declarationKind,
+    grund: String(body.grund || "").slice(0, 500) || "Manuell im Admin-Bereich ausgelöst",
+    gewuenschtes_ende: requestedEnd?.toISOString() || null,
+    eingegangen_am: now,
+    zugeordnet: true,
+    subscription_id: subscription.id,
+    verarbeitungsstatus: "eingegangen",
+  }]);
+  const declarationId = rows[0].id;
+
+  const ergebnis = await verarbeiteZugeordneteErklaerung(db, env, type, subscription, declarationKind, requestedEnd, now);
+
+  await db.update("legal_declarations", `id=eq.${filterWert(declarationId)}`, {
+    wirksam_zum: ergebnis.effectiveAt,
+    verarbeitungsstatus: ergebnis.processingStatus,
+    bestaetigt_am: now,
+  });
+  await db.insert("admin_actions", [
+    {
+      admin_name: "Joerg",
+      aktion: type === "widerruf" ? "widerruf_ausgeloest" : "kuendigung_ausgeloest",
+      subscription_id: subscription.id,
+      customer_id: subscription.customer_id,
+      details: ergebnis.processingStatus,
+    },
+  ]);
+
+  if (email) {
+    const text = type === "widerruf"
+      ? `Der Widerruf zu Vertrag ${subscription.vertragsnummer || subscription.id} wurde im Admin-Bereich erfasst. Bearbeitungsstatus: ${ergebnis.processingStatus}.`
+      : `Die Kündigung zu Vertrag ${subscription.vertragsnummer || subscription.id} wurde im Admin-Bereich erfasst. Bearbeitungsstatus: ${ergebnis.processingStatus}${ergebnis.effectiveAt ? `, wirksam zum ${ergebnis.effectiveAt}` : ""}.`;
+    await nachrichtVormerken(db, env, {
+      customerId: subscription.customer_id,
+      declarationId,
+      to: email,
+      subject: `${type === "widerruf" ? "Widerruf" : "Kündigung"} erfasst – ${subscription.vertragsnummer || subscription.id}`,
+      text,
+    });
+  }
+
+  return json({ status: "ok", verarbeitungsstatus: ergebnis.processingStatus, wirksam_zum: ergebnis.effectiveAt });
+}
+
+// Endgueltiges Loeschen eines Vertrags (z.B. auf Wunsch der Kundin/des
+// Kunden, Art. 17 DSGVO, oder ein aus Versehen angelegter Testeintrag).
+// Loescht nur die Vertragszeile selbst - Zahlungen, Rechnungen,
+// Vertragsannahmen und Kuendigungen dieses Vertrags werden durch die
+// Datenbank per ON DELETE CASCADE automatisch mitentfernt. Das
+// Kundenprofil (E-Mail-Adresse) bleibt bestehen, falls weitere Vertraege
+// oder eine spaetere Neuanlage darauf verweisen.
+async function adminLoeschen(request, env, db) {
+  const body = await request.json().catch(() => ({}));
+  if (!istUuid(body.subscription_id)) return json({ fehler: "fehlende_angaben" }, 400);
+
+  const treffer = await db.select(
+    "subscriptions",
+    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,customer_id,customer_profiles(email)`
+  );
+  if (treffer.length === 0) return json({ fehler: "unbekannter_vertrag" }, 404);
+  const subscription = treffer[0];
+
+  await db.insert("admin_actions", [
+    {
+      admin_name: "Joerg",
+      aktion: "vertrag_geloescht",
+      customer_id: subscription.customer_id,
+      details: `${subscription.vertragsnummer || subscription.id} / ${subscription.customer_profiles?.email || "ohne E-Mail"}`,
+    },
+  ]);
+  await db.delete("subscriptions", `id=eq.${filterWert(body.subscription_id)}`);
+
+  return json({ status: "geloescht" });
 }

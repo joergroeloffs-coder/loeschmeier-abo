@@ -81,7 +81,7 @@
   <button id="ma-anlegen-btn">Zugang anlegen</button>
   <p id="ma-status" style="font-size:13px; margin-top:8px"></p>
 
-  <h2>Kunden</h2>
+  <h2>Kunden <button class="klein" id="csv-vertraege-btn" style="margin-left:8px">Als CSV (Excel)</button></h2>
   <div id="tabelle-wrapper">
     <table>
       <thead>
@@ -91,6 +91,18 @@
         </tr>
       </thead>
       <tbody id="kunden-tabelle"></tbody>
+    </table>
+  </div>
+
+  <h2>Kündigungen &amp; Widerrufe <button class="klein" id="csv-erklaerungen-btn" style="margin-left:8px">Als CSV (Excel)</button></h2>
+  <div id="erklaerungen-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Art</th><th>Vertragsref.</th><th>E-Mail</th><th>Eingegangen</th><th>Bearbeitung</th>
+        </tr>
+      </thead>
+      <tbody id="erklaerungen-tabelle"></tbody>
     </table>
   </div>
 </div>
@@ -104,8 +116,36 @@
     aktiv: ["Aktiv", "aktiv"], ueberfaellig: ["Überfällig", "fehler"],
     kulanzzeit: ["Kulanzzeit", "warnung"], gekuendigt_zum_ende: ["Gekündigt", "warnung"],
     gesperrt: ["Gesperrt", "fehler"], abgelaufen: ["Abgelaufen", "fehler"],
-    erstattet: ["Erstattet", "fehler"], manuell_gesperrt: ["Manuell gesperrt", "fehler"],
+    erstattet: ["Erstattet", "fehler"], widerrufen: ["Widerrufen", "fehler"],
+    manuell_gesperrt: ["Manuell gesperrt", "fehler"],
   };
+
+  const VERARBEITUNG_TEXT = {
+    eingegangen: "Eingegangen, wird noch verarbeitet",
+    zugeordnet: "Zugeordnet, verarbeitet",
+    manuelle_pruefung: "Nicht automatisch zugeordnet - bitte prüfen",
+    widerrufsfrist_abgelaufen: "14-Tage-Frist abgelaufen - keine automatische Erstattung, bitte prüfen",
+    vertrag_bereits_beendet: "Vertrag war schon beendet - nichts erneut verändert",
+    kein_widerrufsrecht_organisation: "Organisation ohne gesetzliches Widerrufsrecht - Vertrag unverändert",
+    paypal_pruefung_noetig: "PayPal-Kündigung fehlgeschlagen - bitte prüfen",
+    erstattung_manuell_pruefen: "Erstattung fehlgeschlagen - bitte prüfen",
+    anteilig_erstattet: "Anteilig erstattet",
+    erstattet: "Vollständig erstattet",
+    keine_zahlung_gefunden: "Keine Zahlung gefunden - bitte prüfen",
+    verarbeitung_fehlgeschlagen_manuell_pruefen: "Fehler bei der Verarbeitung - bitte prüfen",
+  };
+
+  function csvHerunterladen(dateiname, kopfzeile, zeilen){
+    const inhalt = [kopfzeile, ...zeilen].map(z =>
+      z.map(f => '"' + String(f == null ? "" : f).replace(/"/g, '""') + '"').join(";")
+    ).join("\r\n");
+    const blob = new Blob(["﻿" + inhalt], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = dateiname;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
 
   function formatDatum(iso){
     if(!iso) return "–";
@@ -166,6 +206,9 @@
     AKTUELLE_KUNDEN = kunden;
     document.getElementById("kunden-tabelle").innerHTML = kunden.map(k => {
       const [text, art] = STATUS_TEXT[k.status] || [k.status, "warnung"];
+      const geraeteBtn = k.customer_id
+        ? `<button class="klein" onclick="geraeteZuruecksetzen('${k.id}')">Geräte zurücksetzen</button>`
+        : "";
       return `
         <tr>
           <td>${escapeHtml(k.customer_profiles?.email) || "–"}</td>
@@ -181,13 +224,109 @@
             }
             <button class="klein" onclick="kulanzVerlaengern('${k.id}')">+3 Tage Kulanz</button>
             <button class="klein" onclick="bearbeiten('${k.id}')">Bearbeiten</button>
+            ${geraeteBtn}
+            <button class="klein" onclick="erklaerungAusloesen('${k.id}', 'kuendigung')">Kündigen</button>
+            <button class="klein" onclick="erklaerungAusloesen('${k.id}', 'widerruf')">Widerrufen</button>
+            <button class="klein gefahr" onclick="vertragLoeschen('${k.id}')">Löschen</button>
           </td>
+        </tr>
+      `;
+    }).join("");
+
+    const erklaerungenRes = await adminFetch("/api/admin/erklaerungen");
+    const erklaerungen = await erklaerungenRes.json();
+    AKTUELLE_ERKLAERUNGEN = erklaerungen;
+    document.getElementById("erklaerungen-tabelle").innerHTML = erklaerungen.map(e => {
+      const art = e.typ === "widerruf" ? "Widerruf" : "Kündigung";
+      return `
+        <tr>
+          <td>${art}</td>
+          <td>${escapeHtml(e.vertragsreferenz) || "–"}</td>
+          <td>${escapeHtml(e.email) || "–"}</td>
+          <td>${formatDatum(e.eingegangen_am)}</td>
+          <td>${escapeHtml(VERARBEITUNG_TEXT[e.verarbeitungsstatus] || e.verarbeitungsstatus)}</td>
         </tr>
       `;
     }).join("");
   }
 
   let AKTUELLE_KUNDEN = [];
+  let AKTUELLE_ERKLAERUNGEN = [];
+
+  async function geraeteZuruecksetzen(subscriptionId){
+    const kunde = AKTUELLE_KUNDEN.find(k => k.id === subscriptionId);
+    if(!kunde || !kunde.customer_id) return;
+    if(!confirm(`Alle registrierten Geräte für ${kunde.customer_profiles?.email || "diesen Kunden"} zurücksetzen?`)) return;
+    await adminFetch("/api/admin/geraete-zuruecksetzen", { method: "POST", body: JSON.stringify({ customer_id: kunde.customer_id }) });
+    alert("Geräte wurden zurückgesetzt.");
+  }
+
+  async function erklaerungAusloesen(subscriptionId, typ){
+    const kunde = AKTUELLE_KUNDEN.find(k => k.id === subscriptionId);
+    if(!kunde) return;
+    const bezeichnung = typ === "widerruf" ? "Widerruf" : "Kündigung";
+    let erklaerungsart = "ordentlich";
+    if(typ === "kuendigung"){
+      erklaerungsart = confirm(
+        "Außerordentliche Kündigung (sofort, aus wichtigem Grund)?\n\n" +
+        "OK = außerordentlich (sofort)\nAbbrechen = ordentlich (zum nächsten Termin)"
+      ) ? "ausserordentlich" : "ordentlich";
+    }
+    if(!confirm(`${bezeichnung} für ${kunde.customer_profiles?.email || subscriptionId} jetzt auslösen (${erklaerungsart})?`)) return;
+    const res = await adminFetch("/api/admin/erklaerung-ausloesen", {
+      method: "POST",
+      body: JSON.stringify({ subscription_id: subscriptionId, typ, erklaerungsart }),
+    });
+    const daten = await res.json();
+    if(!res.ok){
+      alert("Fehler: " + (daten.fehler || res.status));
+      return;
+    }
+    alert(`Bearbeitungsstatus: ${VERARBEITUNG_TEXT[daten.verarbeitungsstatus] || daten.verarbeitungsstatus}`);
+    ladeAlles();
+  }
+
+  async function vertragLoeschen(subscriptionId){
+    const kunde = AKTUELLE_KUNDEN.find(k => k.id === subscriptionId);
+    if(!kunde) return;
+    const email = kunde.customer_profiles?.email || subscriptionId;
+    const eingabe = prompt(
+      `Vertrag von ${email} (${kunde.tariffs?.bezeichnung || "–"}) endgültig löschen.\n` +
+      `Das kann nicht rückgängig gemacht werden.\n\n` +
+      `Zum Bestätigen "LÖSCHEN" eingeben:`
+    );
+    if(eingabe !== "LÖSCHEN") return;
+    const res = await adminFetch("/api/admin/loeschen", { method: "POST", body: JSON.stringify({ subscription_id: subscriptionId }) });
+    if(!res.ok){
+      const daten = await res.json();
+      alert("Fehler: " + (daten.fehler || res.status));
+      return;
+    }
+    ladeAlles();
+  }
+
+  document.getElementById("csv-vertraege-btn").addEventListener("click", () => {
+    const zeilen = AKTUELLE_KUNDEN.map(k => [
+      k.vertragsnummer || "-",
+      k.customer_profiles?.email || "-",
+      formatDatum(k.erstellt_am),
+      (STATUS_TEXT[k.status] || [k.status])[0],
+      formatDatum(k.bezahlt_bis),
+    ]);
+    csvHerunterladen("Vertraege.csv", ["Vertragsnummer", "E-Mail", "Erstellt", "Status", "Bezahlt bis"], zeilen);
+  });
+
+  document.getElementById("csv-erklaerungen-btn").addEventListener("click", () => {
+    const zeilen = AKTUELLE_ERKLAERUNGEN.map(e => [
+      e.typ === "widerruf" ? "Widerruf" : "Kündigung",
+      e.vertragsreferenz || "-",
+      e.email || "-",
+      formatDatum(e.eingegangen_am),
+      VERARBEITUNG_TEXT[e.verarbeitungsstatus] || e.verarbeitungsstatus,
+    ]);
+    csvHerunterladen("Kuendigungen_Widerrufe.csv", ["Art", "Vertragsreferenz", "E-Mail", "Eingegangen", "Bearbeitung"], zeilen);
+  });
+
   async function bearbeiten(id){
     const kunde = AKTUELLE_KUNDEN.find(k => k.id === id);
     if(!kunde) return;
