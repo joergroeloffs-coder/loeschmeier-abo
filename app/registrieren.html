@@ -194,9 +194,43 @@
         outline: 3px solid var(--accent);
         outline-offset: 2px;
       }
+      /* Löschbärt-Maskottchen links/rechts neben der Bestellung - nur wenn
+         genug Platz ist, damit auf schmaleren Bildschirmen nichts überlappt.
+         Rein dekorativ, kein Einfluss auf Formular/Funktion. */
+      .maskottchen {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        width: 300px;
+        pointer-events: none;
+        filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5));
+      }
+      .maskottchen.links {
+        left: max(24px, calc(50% - 660px));
+      }
+      .maskottchen.rechts {
+        right: max(24px, calc(50% - 660px));
+      }
+      @media (min-width: 1440px) {
+        .maskottchen {
+          display: block;
+        }
+      }
     </style>
   </head>
   <body>
+    <img
+      class="maskottchen links"
+      src="img/loeschbaert-hydrant.webp"
+      alt=""
+      aria-hidden="true"
+    />
+    <img
+      class="maskottchen rechts"
+      src="img/loeschbaert-daumen.webp"
+      alt=""
+      aria-hidden="true"
+    />
     <main>
       <h1>Löschbärt Föhr</h1>
       <p class="lead">
