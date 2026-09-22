@@ -127,9 +127,31 @@
       .error {
         color: var(--bad);
       }
+      /* Löschbärt-Maskottchen links neben dem Formular - nur wenn genug
+         Platz ist. Rein dekorativ, kein Einfluss auf Formular/Funktion. */
+      .maskottchen {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: max(24px, calc(50% - 664px));
+        width: 300px;
+        pointer-events: none;
+        filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5));
+      }
+      @media (min-width: 1440px) {
+        .maskottchen {
+          display: block;
+        }
+      }
     </style>
   </head>
   <body>
+    <img
+      class="maskottchen"
+      src="img/loeschbaert-nachdenklich.webp"
+      alt=""
+      aria-hidden="true"
+    />
     <main>
       <p><a href="/registrieren.html">← Zurück</a></p>
       <h1>Verträge hier kündigen</h1>
