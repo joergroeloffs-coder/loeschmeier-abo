@@ -1,4 +1,6 @@
 setup/paypal_zugangsdaten.json
 setup/supabase_zugangsdaten.json
+setup/Vertraege.csv
+setup/Kuendigungen_Widerrufe.csv
 __pycache__/
 *.py[cod]

@@ -19,15 +19,22 @@ Nutzung:
 Zeigt zusätzlich, ganz unten, eine Liste der letzten Kündigungen und
 Widerrufe mit Bearbeitungsstatus - genau dort steht z.B., ob eine
 Erstattung geklappt hat oder manuell geprüft werden muss.
+
+Schreibt außerdem zwei Dateien in diesen Ordner (setup/), die sich per
+Doppelklick direkt in Excel öffnen lassen:
+  Vertraege.csv
+  Kuendigungen_Widerrufe.csv
 """
 
+import csv
 import json
 import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
 
-ZUGANGSDATEN_PFAD = Path(__file__).resolve().parent / "supabase_zugangsdaten.json"
+ORDNER = Path(__file__).resolve().parent
+ZUGANGSDATEN_PFAD = ORDNER / "supabase_zugangsdaten.json"
 
 STATUS_TEXT = {
     "unbezahlt": "Noch nicht bezahlt",
@@ -96,6 +103,18 @@ def datum_kurz(wert):
     return str(wert)[:10]
 
 
+def csv_schreiben(dateiname, kopfzeile, zeilen):
+    # utf-8-sig (mit BOM) und Semikolon, damit Excel in der deutschen
+    # Standardeinstellung Umlaute korrekt zeigt und automatisch Spalten
+    # erkennt, statt alles in eine Spalte zu quetschen.
+    pfad = ORDNER / dateiname
+    with pfad.open("w", encoding="utf-8-sig", newline="") as datei:
+        schreiber = csv.writer(datei, delimiter=";")
+        schreiber.writerow(kopfzeile)
+        schreiber.writerows(zeilen)
+    return pfad
+
+
 def main():
     basis_url, schluessel = lade_zugangsdaten()
 
@@ -110,6 +129,7 @@ def main():
     print()
     print(f"{'Vertragsnummer':<24}{'E-Mail':<32}{'Erstellt':<12}{'Status':<38}{'Bezahlt bis':<12}")
     print("-" * 118)
+    vertraege_zeilen = []
     for abo in abos:
         email = (abo.get("customer_profiles") or {}).get("email", "-")
         print(
@@ -119,7 +139,19 @@ def main():
             f"{klartext(abo.get('status'), STATUS_TEXT):<38}"
             f"{datum_kurz(abo.get('bezahlt_bis')):<12}"
         )
+        vertraege_zeilen.append([
+            abo.get("vertragsnummer") or "-",
+            email,
+            datum_kurz(abo.get("erstellt_am")),
+            klartext(abo.get("status"), STATUS_TEXT),
+            datum_kurz(abo.get("bezahlt_bis")),
+        ])
     print(f"\nGesamt: {len(abos)} Verträge")
+    vertraege_pfad = csv_schreiben(
+        "Vertraege.csv",
+        ["Vertragsnummer", "E-Mail", "Erstellt", "Status", "Bezahlt bis"],
+        vertraege_zeilen,
+    )
 
     print("\n\nLetzte Kündigungen und Widerrufe")
     erklaerungen = abfrage(
@@ -131,6 +163,7 @@ def main():
     print()
     print(f"{'Art':<12}{'Vertragsref.':<24}{'E-Mail':<32}{'Eingegangen':<12}{'Bearbeitung':<45}")
     print("-" * 125)
+    erklaerungen_zeilen = []
     for e in erklaerungen:
         art = "Widerruf" if e.get("typ") == "widerruf" else "Kündigung"
         print(
@@ -140,7 +173,21 @@ def main():
             f"{datum_kurz(e.get('eingegangen_am')):<12}"
             f"{klartext(e.get('verarbeitungsstatus'), VERARBEITUNG_TEXT):<45}"
         )
+        erklaerungen_zeilen.append([
+            art,
+            e.get("vertragsreferenz") or "-",
+            e.get("email") or "-",
+            datum_kurz(e.get("eingegangen_am")),
+            klartext(e.get("verarbeitungsstatus"), VERARBEITUNG_TEXT),
+        ])
     print(f"\nGesamt: {len(erklaerungen)} Erklärungen (letzte 50)")
+    erklaerungen_pfad = csv_schreiben(
+        "Kuendigungen_Widerrufe.csv",
+        ["Art", "Vertragsreferenz", "E-Mail", "Eingegangen", "Bearbeitung"],
+        erklaerungen_zeilen,
+    )
+
+    print(f"\n\nAls Excel-Tabelle gespeichert:\n  {vertraege_pfad}\n  {erklaerungen_pfad}")
 
 
 if __name__ == "__main__":
