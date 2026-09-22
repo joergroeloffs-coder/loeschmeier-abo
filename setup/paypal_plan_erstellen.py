@@ -88,13 +88,18 @@ def main():
     print(f"  Produkt-ID: {produkt_id}")
 
     print("Lege Preisplan an (12 EUR / Jahr, automatische Verlängerung) ...")
+    # PayPal lehnt "description" ab 128 Zeichen mit INVALID_STRING_MAX_LENGTH
+    # ab - lieber hier vorher pruefen als erst bei PayPal einen kryptischen
+    # Fehler bekommen.
+    beschreibung = "12 EUR pro Jahr; 12 Monate Mindestlaufzeit, danach Verlaengerung um je 12 Monate, kuendbar mit 6 Wochen Frist zum Laufzeitende"
+    assert len(beschreibung) <= 127, f"description zu lang fuer PayPal: {len(beschreibung)} Zeichen (max. 127)"
     plan = anfrage(
         "/v1/billing/plans",
         methode="POST",
         body={
             "product_id": produkt_id,
             "name": "Löschbärt Föhr – Jahreszugang",
-            "description": "12 EUR pro Jahr; 12 Monate Mindestlaufzeit, danach Verlaengerung um jeweils 12 Monate, kuendbar mit 6 Wochen Frist zum Laufzeitende",
+            "description": beschreibung,
             "billing_cycles": [
                 {
                     "frequency": {"interval_unit": "YEAR", "interval_count": 1},
