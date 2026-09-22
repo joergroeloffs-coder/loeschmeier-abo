@@ -440,3 +440,41 @@ Die technischen Hindernisse sind benannt und abarbeitbar. Die verbleibenden
 Hindernisse sind keine technischen: die offenen Betreiberangaben aus
 Abschnitt 8, die Entscheidung aus Abschnitt 3.1 und die externe rechtliche und
 steuerliche Prüfung.
+
+## 12. Nachtrag 22.9.2026: Kündigungsregel geändert
+
+Auf ausdrücklichen Wunsch des Betreibers geändert von „nach 12 Monaten
+Mindestlaufzeit jederzeit kündbar, anteilige Erstattung" auf:
+
+- 12 Monate Mindestlaufzeit, danach automatische Verlängerung um jeweils
+  weitere 12 Monate
+- ordentlich kündbar mit einer Frist von 6 Wochen zum Ende der jeweiligen
+  Laufzeit; wird diese Frist unterschritten, verlängert sich der Vertrag um
+  ein weiteres Jahr
+- für die ordentliche Kündigung entfällt die anteilige Erstattung (sie wirkt
+  ja nur noch zum ohnehin bezahlten Laufzeitende)
+- außerordentliche Kündigung aus wichtigem Grund und das gesetzliche
+  14-Tage-Widerrufsrecht bleiben unverändert bestehen (weiterhin sofort
+  wirksam, mit anteiliger Erstattung/Wertersatz nach den gesetzlichen Regeln)
+
+Geändert: AGB (`app/agb.html`), Bestellübersicht und Kündigungsformular
+(`app/registrieren.html`, `app/kuendigen.html`), Kundenbereich-Dialogtext
+(`app/kundenbereich.html`), Worker-Logik `kuendigungVerarbeiten`
+(`worker/src/index.js`, Bundle neu gebaut), PayPal-Plan-Beschreibungstext
+(`setup/paypal_plan_erstellen.py`) sowie die Marketingtexte in
+`roewise.com` (`index.html`, `einzelabo.html`).
+
+**Wichtig:** Der bereits im PayPal-Sandbox angelegte Plan
+(`P-0PT23151YG359235SNKYWEQI`) trägt weiterhin die alte Beschreibung –
+PayPal aktualisiert den Text eines bestehenden Plans nicht automatisch durch
+eine Änderung des Erstellungsskripts. Für die Sandbox-Tests ist das
+unschädlich (`SALES_ENABLED=false`), vor einer Live-Schaltung mit diesem
+neuen Vertragsmodell sollte der Plan-Text im PayPal-Dashboard geprüft und
+bei Bedarf ein neuer Plan mit korrektem Text angelegt werden.
+
+Drei neue Worker-Tests decken die neue Regel ab (mehr als 6 Wochen Vorlauf,
+weniger als 6 Wochen Vorlauf, außerordentliche Kündigung), 33 von 33
+Worker-Tests bestehen. Ein Groß-/Kleinschreibungsfehler in einem
+Browser-Test (`test/browser/erklaerungen.test.js`) wurde dabei gefunden und
+behoben – er bestand bereits vor dieser Änderung und war nicht durch die
+Kündigungsregel verursacht.

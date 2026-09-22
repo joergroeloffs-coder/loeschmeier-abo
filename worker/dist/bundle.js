@@ -550,7 +550,7 @@ async function rechtserklaerung(request, env, type) {
 
     if (subscription) {
       if (type === "kuendigung") {
-        const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd);
+        const result = await kuendigungVerarbeiten(db, env, subscription, data.requestedEnd, data.declarationKind);
         effectiveAt = result.effectiveAt;
         processingStatus = result.processingStatus;
         cancellationRefundCents = result.refundedCents;
@@ -657,15 +657,38 @@ async function rechtserklaerung(request, env, type) {
   });
 }
 
-async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null) {
+const SECHS_WOCHEN_MS = 6 * 7 * 24 * 60 * 60 * 1000;
+
+async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null, declarationKind = "ordentlich") {
   const now = new Date();
   const minimumEnd = subscription.mindestlaufzeit_bis
     ? new Date(subscription.mindestlaufzeit_bis)
     : new Date(subscription.bezahlt_bis || now);
   const paidUntil = new Date(subscription.bezahlt_bis || minimumEnd);
-  let effective = now < minimumEnd ? minimumEnd : now;
-  if (requestedEnd && requestedEnd > effective) effective = requestedEnd;
-  if (effective > paidUntil) effective = paidUntil;
+
+  let effective;
+  const refundEligible = declarationKind === "ausserordentlich";
+  if (refundEligible) {
+    // Ausserordentliche Kuendigung aus wichtigem Grund wirkt sofort,
+    // unabhaengig von Mindestlaufzeit und Sechs-Wochen-Frist.
+    effective = now;
+    if (requestedEnd && requestedEnd > effective && requestedEnd < paidUntil) effective = requestedEnd;
+  } else {
+    // Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
+    // fruehestens zum Ende der Mindestlaufzeit. Liegen zwischen jetzt und
+    // diesem Zeitpunkt weniger als sechs Wochen, verlaengert sich der
+    // Vertrag noch um ein weiteres Jahr (naechster Kuendigungstermin) -
+    // siehe AGB Ziffer 5.
+    let naechstesEnde = paidUntil < minimumEnd ? minimumEnd : paidUntil;
+    while (naechstesEnde.getTime() - now.getTime() < SECHS_WOCHEN_MS) {
+      const weiter = new Date(naechstesEnde);
+      weiter.setUTCFullYear(weiter.getUTCFullYear() + 1);
+      naechstesEnde = weiter;
+    }
+    effective = naechstesEnde;
+    // Ein spaeterer Wunschtermin ist immer zulaessig, ein frueherer nicht.
+    if (requestedEnd && requestedEnd > effective) effective = requestedEnd;
+  }
 
   let processingStatus = "zugeordnet";
   let refundedCents = 0;
@@ -674,9 +697,11 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null)
     if (!cancelled) processingStatus = "paypal_pruefung_noetig";
   }
 
-  // Nach der Mindestlaufzeit darf jederzeit beendet werden. Eine bereits
-  // gezahlte Jahresrate wird fuer die ungenutzte Restzeit anteilig erstattet.
-  if (now >= minimumEnd && effective < paidUntil) {
+  // Nur bei ausserordentlicher Kuendigung endet der Vertrag vor dem
+  // Laufzeitende; dafuer wird die bereits gezahlte, ungenutzte Restzeit
+  // anteilig erstattet. Eine ordentliche Kuendigung wirkt erst zum
+  // Laufzeitende, dafuer entfaellt eine anteilige Erstattung.
+  if (refundEligible && effective < paidUntil) {
     const payments = await db.select(
       "payments",
       `subscription_id=eq.${subscription.id}&status=in.(erfolgreich,teilweise_erstattet)&select=id,paypal_capture_id,betrag_cent,waehrung,zeitpunkt,erstattet_cent&order=zeitpunkt.desc&limit=1`

@@ -25,10 +25,12 @@ function pruefe(name, bedingung) {
   pruefe(`Bestellbutton heißt "Zahlungspflichtig abonnieren" (ist: "${btnText}")`,
     btnText === 'Zahlungspflichtig abonnieren');
 
-  const uebersicht = await p1.locator('.uebersicht').innerText();
+  // .toLowerCase(), weil die dt-Überschriften per CSS uppercase dargestellt
+  // werden (innerText liefert den tatsächlich gerenderten Text).
+  const uebersicht = (await p1.locator('.uebersicht').innerText()).toLowerCase();
   for (const begriff of ['Gesamtpreis', '12,00', '§ 19 UStG', 'PayPal', 'Mindestlaufzeit',
                          'Kündigung', 'Geräte', 'Anbieter', 'Widerrufsbelehrung']) {
-    pruefe(`Bestellübersicht nennt "${begriff}"`, uebersicht.includes(begriff));
+    pruefe(`Bestellübersicht nennt "${begriff}"`, uebersicht.includes(begriff.toLowerCase()));
   }
 
   const vorbelegt = await p1.evaluate(() =>

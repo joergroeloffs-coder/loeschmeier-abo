@@ -156,7 +156,7 @@
             name="vertragsreferenz"
             required
             maxlength="160"
-            placeholder="z. B. LM-2026-…" /></label
+            placeholder="z. B. LB-2026-…" /></label
         ><label
           >Vertrag<input
             name="vertragsbezeichnung"
@@ -165,11 +165,21 @@
         ><label
           >Art der Kündigung<select name="erklaerungsart">
             <option value="ordentlich">
-              Ordentlich zum nächstmöglichen Zeitpunkt
+              Ordentlich, zum Ende der Vertragslaufzeit
             </option>
-            <option value="ausserordentlich">Außerordentlich</option>
+            <option value="ausserordentlich">
+              Außerordentlich, aus wichtigem Grund
+            </option>
           </select></label
         >
+        <p class="hint">
+          Eine ordentliche Kündigung wirkt zum Ende der laufenden
+          Vertragslaufzeit (Mindestlaufzeit 12 Monate, danach Verlängerung um
+          je 12 Monate). Erfolgt sie weniger als 6 Wochen vorher, wirkt sie
+          erst zum darauffolgenden Laufzeitende. Eine anteilige Erstattung
+          erfolgt dafür nicht. Für eine außerordentliche Kündigung aus
+          wichtigem Grund bitte unten einen Grund angeben; sie wirkt sofort.
+        </p>
         <fieldset>
           <legend>Zeitpunkt der Beendigung</legend>
           <label class="zeile"

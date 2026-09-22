@@ -550,3 +550,95 @@ test("Katalog gibt ohne Verkaufsfreigabe keine PayPal-Daten heraus", async () =>
   assert.equal(katalog.tarife[0].paypalPlanId, null);
   assert.equal(katalog.tarife[0].kaufbar, false);
 });
+
+// ---- Neue Kuendigungsregel: 12 Monate Mindestlaufzeit, danach Verlaengerung
+// um je 12 Monate, ordentlich kuendbar mit 6 Wochen Frist zum Laufzeitende,
+// ohne anteilige Erstattung. Ausserordentliche Kuendigung wirkt weiterhin
+// sofort, mit anteiliger Erstattung der ungenutzten Restzeit.
+
+test("Ordentliche Kuendigung mit mehr als 6 Wochen Vorlauf wirkt zum Laufzeitende, ohne Erstattung", async () => {
+  const paidUntil = new Date(Date.now() + 200 * 24 * 60 * 60 * 1000); // weit in der Zukunft
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: paidUntil.toISOString(),
+        mindestlaufzeit_bis: paidUntil.toISOString(),
+      }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "C-1", betrag_cent: 1200, waehrung: "EUR", zeitpunkt: new Date().toISOString(), erstattet_cent: 0 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ordentlich",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].wirksam_zum, paidUntil.toISOString());
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "zugeordnet");
+  assert.equal(daten.payments[0].status, "erfolgreich", "keine Erstattung bei ordentlicher Kuendigung");
+});
+
+test("Ordentliche Kuendigung weniger als 6 Wochen vor Laufzeitende verlaengert den Vertrag um ein Jahr", async () => {
+  const paidUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // in 10 Tagen, zu spaet fuer die 6-Wochen-Frist
+  const erwartet = new Date(paidUntil);
+  erwartet.setUTCFullYear(erwartet.getUTCFullYear() + 1);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: paidUntil.toISOString(),
+        mindestlaufzeit_bis: paidUntil.toISOString(),
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ordentlich",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].wirksam_zum, erwartet.toISOString());
+});
+
+test("Ausserordentliche Kuendigung wirkt sofort und erstattet die ungenutzte Restzeit anteilig", async () => {
+  const zahlungAm = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+  const paidUntil = new Date(zahlungAm.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: paidUntil.toISOString(),
+        mindestlaufzeit_bis: zahlungAm.toISOString(),
+      }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "C-1", betrag_cent: 1200, waehrung: "EUR", zeitpunkt: zahlungAm.toISOString(), erstattet_cent: 0 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ausserordentlich", grund: "Dienst dauerhaft nicht erreichbar",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "anteilig_erstattet");
+  assert.ok(daten.payments[0].erstattet_cent > 0, "anteilige Erstattung erfolgt bei ausserordentlicher Kuendigung");
+  assert.notEqual(daten.legal_declarations[0].wirksam_zum, paidUntil.toISOString(), "wirkt sofort, nicht erst zum Laufzeitende");
+});
