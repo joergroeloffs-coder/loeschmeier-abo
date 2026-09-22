@@ -613,6 +613,63 @@ test("Katalog gibt ohne Verkaufsfreigabe keine PayPal-Daten heraus", async () =>
 // ohne anteilige Erstattung. Ausserordentliche Kuendigung wirkt weiterhin
 // sofort, mit anteiliger Erstattung der ungenutzten Restzeit.
 
+test("Kuendigung auf bereits erstatteten Vertrag ueberschreibt den Status nicht", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "erstattet", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: new Date(Date.now() + 300 * 24 * 60 * 60 * 1000).toISOString(),
+        kuendigungswirksam_am: "2026-09-22T16:51:09.678Z",
+      }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ordentlich",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "vertrag_bereits_beendet");
+  // Der schon erstattete Vertrag bleibt "erstattet" - wird NICHT auf
+  // "gekuendigt_zum_ende" zurueckgesetzt.
+  assert.equal(daten.subscriptions[0].status, "erstattet");
+});
+
+test("Widerruf auf bereits erstatteten Vertrag ueberschreibt den Status nicht", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "erstattet", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC",
+        erstellt_am: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        kuendigungswirksam_am: "2026-09-22T16:51:09.678Z",
+      }],
+      payments: [{ id: "zahl-1", subscription_id: "abo-1", status: "erstattet", paypal_capture_id: "SALE-1", betrag_cent: 1200, erstattet_cent: 1200 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/widerrufen", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "vertrag_bereits_beendet");
+  // Bleibt "erstattet" - wird NICHT faelschlich auf "widerrufen" zurueckgesetzt.
+  assert.equal(daten.subscriptions[0].status, "erstattet");
+  assert.equal(daten.payments[0].status, "erstattet");
+});
+
 test("Ordentliche Kuendigung mit mehr als 6 Wochen Vorlauf wirkt zum Laufzeitende, ohne Erstattung", async () => {
   const paidUntil = new Date(Date.now() + 200 * 24 * 60 * 60 * 1000); // weit in der Zukunft
   const { umgebung, daten } = baueUmgebung({

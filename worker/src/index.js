@@ -267,7 +267,7 @@ async function rechtserklaerung(request, env, type) {
       customerId = profiles[0].id;
       const subscriptions = await db.select(
         "subscriptions",
-        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am`
+        `customer_id=eq.${filterWert(customerId)}&select=id,vertragsnummer,paypal_subscription_id,status,bezahlt_bis,mindestlaufzeit_bis,erstellt_am,kuendigungswirksam_am`
       );
       // Die Vertragsreferenz muss zu genau dem Konto gehoeren, dessen
       // E-Mail-Adresse angegeben wurde. Sonst bleibt es bei manueller Pruefung.
@@ -302,7 +302,13 @@ async function rechtserklaerung(request, env, type) {
         );
         if (!cancelled) processingStatus = "paypal_pruefung_noetig";
       }
-      if (type === "widerruf") {
+      if (type === "widerruf" && ["erstattet", "widerrufen"].includes(subscription.status)) {
+        // Bereits erledigt (z.B. Doppel-Einreichung) - nichts erneut
+        // ueberschreiben, insbesondere "erstattet" nicht faelschlich
+        // wieder auf "widerrufen" zuruecksetzen.
+        processingStatus = "vertrag_bereits_beendet";
+        effectiveAt = subscription.kuendigungswirksam_am || now;
+      } else if (type === "widerruf") {
         const payments = await db.select(
           "payments",
           `subscription_id=eq.${filterWert(subscription.id)}&status=eq.erfolgreich&select=id,paypal_capture_id,betrag_cent&order=zeitpunkt.desc&limit=1`
@@ -400,6 +406,17 @@ async function rechtserklaerung(request, env, type) {
 const SECHS_WOCHEN_MS = 6 * 7 * 24 * 60 * 60 * 1000;
 
 async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null, declarationKind = "ordentlich") {
+  // Ein bereits beendeter Vertrag (erstattet/widerrufen/abgelaufen) darf durch
+  // eine nachtraeglich eingehende Kuendigung nicht wieder auf "gekuendigt,
+  // laeuft bis Vertragsende" zurueckgesetzt werden - sonst wirkt ein schon
+  // erstatteter Vertrag faelschlich wieder aktiv.
+  if (["erstattet", "widerrufen", "abgelaufen"].includes(subscription.status)) {
+    return {
+      effectiveAt: subscription.kuendigungswirksam_am || subscription.bezahlt_bis || new Date().toISOString(),
+      processingStatus: "vertrag_bereits_beendet",
+      refundedCents: 0,
+    };
+  }
   const now = new Date();
   const minimumEnd = subscription.mindestlaufzeit_bis
     ? new Date(subscription.mindestlaufzeit_bis)
