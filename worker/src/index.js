@@ -11,6 +11,12 @@ import {
   validatePublicDeclaration,
 } from "./legal.js";
 
+// Fassung der Gemeinde-/Feuerwehr-Vertragsbedingungen (Organisationen, keine
+// Verbraucher iSd § 13 BGB - eigene, einfachere Bedingungen statt der
+// Privatkunden-AGB). Entwurf, noch nicht anwaltlich geprueft - siehe
+// app/gemeinde-agb.html.
+const GEMEINDE_AGB_VERSION = "gemeinde-2026-09-23-entwurf";
+
 // Nur die eigenen Seiten duerfen den Worker aus einem Browser heraus
 // aufrufen. Eine fremde Webseite kann damit keine Anfragen im Namen eines
 // angemeldeten Kunden stellen. Weitere Adressen (z.B. eine kuenftige Domain)
@@ -1363,9 +1369,14 @@ async function adminManuellAnlegen(request, env, db) {
 
   const tarife = await db.select(
     "tariffs",
-    `code=eq.${filterWert(tariffCode)}&aktiv=eq.true&select=id,bezeichnung`
+    `code=eq.${filterWert(tariffCode)}&aktiv=eq.true&select=id,bezeichnung,intervall,zielgruppe`
   );
   if (tarife.length === 0) return json({ fehler: "unbekannter_tarif" }, 400);
+  // Organisationen (Gemeinden/Feuerwehren) sind keine Verbraucher (§ 13 BGB):
+  // das gesetzliche Widerrufsrecht und die Verbraucher-Kuendigungsregeln der
+  // Privatkunden-AGB gelten fuer sie nicht automatisch. Fuer diese Vertraege
+  // gilt bis zu einer individuellen Vereinbarung der eigene Gemeinde-Entwurf.
+  const istOrganisation = tarife[0].zielgruppe === "organisation";
 
   let profile = await db.select("customer_profiles", `email=eq.${filterWert(email)}&select=id,auth_user_id`);
   let customerId;
@@ -1387,8 +1398,11 @@ async function adminManuellAnlegen(request, env, db) {
   const now = new Date();
   const performanceStart = body.leistungsbeginn ? new Date(body.leistungsbeginn) : now;
   if (Number.isNaN(performanceStart.getTime())) return json({ fehler: "ungueltiges_datum" }, 400);
+  // Laufzeit richtet sich nach dem Abrechnungsintervall des Tarifs -
+  // 'monatlich' bedeutet einen Monat, alles andere weiterhin zwoelf Monate.
+  const periodenMonate = tarife[0].intervall === "monatlich" ? 1 : 12;
   const contractEnd = new Date(performanceStart);
-  contractEnd.setUTCFullYear(contractEnd.getUTCFullYear() + 1);
+  contractEnd.setUTCMonth(contractEnd.getUTCMonth() + periodenMonate);
   const contractNumber = createContractNumber(now);
   const zahlungsreferenz = String(body.zahlungsreferenz || "").slice(0, 300) || null;
 
@@ -1403,8 +1417,8 @@ async function adminManuellAnlegen(request, env, db) {
       leistungsbeginn_am: performanceStart.toISOString(),
       mindestlaufzeit_bis: contractEnd.toISOString(),
       bezahlt_bis: contractEnd.toISOString(),
-      agb_version: LEGAL_VERSION,
-      widerruf_version: LEGAL_VERSION,
+      agb_version: istOrganisation ? GEMEINDE_AGB_VERSION : LEGAL_VERSION,
+      widerruf_version: istOrganisation ? null : LEGAL_VERSION,
       datenschutz_version: LEGAL_VERSION,
       notiz: zahlungsreferenz ? `Manuell angelegt (Zahlung außerhalb PayPal): ${zahlungsreferenz}` : "Manuell angelegt (Zahlung außerhalb PayPal)",
     },
@@ -1422,6 +1436,9 @@ async function adminManuellAnlegen(request, env, db) {
     `Leistungsbeginn: ${performanceStart.toISOString()}`,
     `Laufzeit bis: ${contractEnd.toISOString()}`,
     "Die Zahlung wurde außerhalb von PayPal (z.B. per Überweisung/Rechnung) erhalten und manuell verbucht.",
+    istOrganisation
+      ? `Es gelten die Vertragsbedingungen für Gemeinden/Feuerwehren: ${basisUrl(env)}/gemeinde-agb.html`
+      : `Es gelten die AGB: ${basisUrl(env)}/agb.html`,
     "",
     "Zugang: Bitte auf der Nutzerseite mit dieser E-Mail-Adresse anmelden (Anmelde-Link per E-Mail).",
     "Kontakt: wasserentnahme-foehr@web.de",

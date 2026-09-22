@@ -845,3 +845,26 @@ test("Admin: Bearbeiten ohne gueltige subscription_id abgelehnt", async () => {
   const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
   assert.equal(antwort.status, 400);
 });
+
+test("Admin: manueller Gemeinde-Zugang (monatlich) bekommt 1 Monat Laufzeit und eigene Vertragsbedingungen", async () => {
+  const gemeindeTarif = {
+    id: "tarif-gemeinde", code: "gemeinde-vorlage", bezeichnung: "Löschbärt – Gemeindeversion",
+    preis_cent: 2400, waehrung: "EUR", aktiv: true, oeffentlich: false,
+    intervall: "monatlich", zielgruppe: "organisation", max_geraete: 5,
+  };
+  const { umgebung, daten } = baueUmgebung({ tabellen: { tariffs: [gemeindeTarif] } });
+  const worker = await ladeWorker(umgebung);
+  const leistungsbeginn = "2026-10-01T00:00:00.000Z";
+  const anfrageMitPasswort = new Request("https://worker.test/api/admin/manuell-anlegen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ email: "feuerwehr@example.test", tariff_code: "gemeinde-vorlage", leistungsbeginn }),
+  });
+  const antwort = await worker.fetch(anfrageMitPasswort, { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 200);
+  const abo = daten.subscriptions[0];
+  assert.equal(abo.bezahlt_bis, "2026-11-01T00:00:00.000Z", "genau ein Monat, nicht ein Jahr");
+  assert.equal(abo.mindestlaufzeit_bis, "2026-11-01T00:00:00.000Z");
+  assert.notEqual(abo.agb_version, "2026-09-21", "nutzt nicht die Privatkunden-AGB-Version");
+  assert.equal(abo.widerruf_version, null, "kein Verbraucher-Widerrufsrecht fuer Organisationen");
+});
