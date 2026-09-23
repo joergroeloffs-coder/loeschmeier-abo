@@ -1,6 +1,6 @@
 "use strict";
 importScripts("../config.js");
-const SHELL_CACHE = "nutzer-shell-v20-verbesserungen-uebernommen";
+const SHELL_CACHE = "nutzer-shell-v21-foto-entfernt";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",
