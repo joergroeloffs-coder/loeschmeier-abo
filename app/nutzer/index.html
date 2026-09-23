@@ -132,6 +132,9 @@
     border-radius:999px;display:flex;align-items:center;justify-content:center;gap:8px;
   }
   .btn.ghost{background:none}
+  .btn.gruen{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+  .btn.gelb{background:var(--warn);border-color:var(--warn);color:#171203;font-weight:600}
+  .btn.rot{background:var(--signal);border-color:var(--signal);color:#fff;font-weight:600}
   .row{display:flex;gap:10px}
   .row>*{flex:1}
 
@@ -211,6 +214,16 @@
     width:0;height:0;margin-top:-1px;
     border:9px solid transparent;border-top-width:10px;border-top-color:var(--pin, var(--signal));
   }
+  .nr-marker-wrap.puls{animation:nrPuls 1s ease-in-out 4;z-index:1000}
+  @keyframes nrPuls{
+    0%,100%{transform:translate(-50%,-100%) scale(1)}
+    50%{transform:translate(-50%,-100%) scale(1.8)}
+  }
+  .item-typ{
+    width:30px;height:30px;border-radius:50%;flex:none;display:flex;
+    align-items:center;justify-content:center;background:var(--c,var(--signal));
+  }
+  .item-typ svg{width:16px;height:16px;display:block}
   .peil-hinweis-touch{
     position:fixed;left:0;right:0;bottom:14px;text-align:center;z-index:1550;
     color:var(--dim);font-size:13px;pointer-events:none;
@@ -276,14 +289,32 @@
       <div class="ziel-meta" id="detailMeta"></div>
       <div class="koord" id="detailKoord" style="text-align:left;margin-top:10px"></div>
       <div class="hinweis" id="detailHinweis"></div>
-      <p class="navfrage">Zu diesem Punkt navigieren?</p>
-      <div class="row">
-        <button class="btn primary" id="detail-ja">Ja, navigieren</button>
-        <button class="btn ghost" id="detail-nein">Nein</button>
-      </div>
+      <button class="btn gruen" id="detail-ja" style="margin-top:12px">Hierher navigieren</button>
+      <button class="btn gelb" id="detail-zentrieren" style="margin-top:8px">Auf Karte zentrieren</button>
+      <button class="btn rot" id="detail-nein" style="margin-top:8px">Zurück</button>
       <button class="btn ghost" id="detail-korrektur" style="margin-top:8px">Eigene Position als Korrektur teilen</button>
+      <button class="btn ghost" id="detail-angaben" style="margin-top:8px">✏️ Angaben korrigieren</button>
       <button class="btn ghost" id="detail-foto" style="margin-top:8px">📷 Foto senden</button>
       <input type="file" accept="image/*" capture="environment" id="foto-input" style="display:none">
+    </div>
+  </div>
+
+  <!-- Angaben korrigieren: Ortschaft, Straße/Lage, Typ, Bemerkung per E-Mail melden -->
+  <div class="detail-overlay" id="angabenOverlay">
+    <div class="detail-karte">
+      <div class="ziel">Angaben korrigieren</div>
+      <div class="ziel-meta" id="angabenZiel"></div>
+      <label for="ang-ortschaft">Ortschaft</label>
+      <select id="ang-ortschaft"></select>
+      <label for="ang-strasse">Straße / Lage</label>
+      <input type="text" id="ang-strasse" autocomplete="off">
+      <label for="ang-typ">Typ</label>
+      <select id="ang-typ"></select>
+      <label for="ang-bemerkung">Bemerkung</label>
+      <input type="text" id="ang-bemerkung" autocomplete="off">
+      <div class="hinweis" style="margin-top:10px">Geänderte Felder werden per E-Mail gesendet, überprüft und zeitnah geändert. Dies kann einige Tage dauern.</div>
+      <button class="btn gruen" id="angaben-senden" style="margin-top:12px">Absenden</button>
+      <button class="btn rot" id="angaben-abbrechen" style="margin-top:8px">Abbrechen</button>
     </div>
   </div>
 
@@ -552,6 +583,11 @@ if("geolocation" in navigator){
     gpsDetail.textContent = p.coords.latitude.toFixed(5) + ", " + p.coords.longitude.toFixed(5);
     if(typeof p.coords.heading === "number" && !isNaN(p.coords.heading) && p.coords.speed > 1) gpsKurs = p.coords.heading;
     aktualisierePeil();
+    if(map && !kartePositionAufEigenenStandort){
+      map.fitBounds(L.latLng(pos.latitude, pos.longitude).toBounds(2000));
+      kartePositionAufEigenenStandort = true;
+    }
+    zeichneEigenePositionAufKarte();
     const jetzt = Date.now();
     if(jetzt - letzterListenRedraw > 1500){ letzterListenRedraw = jetzt; zeichneListe(); }
   }, err => {
@@ -588,11 +624,19 @@ const sucheEl = document.getElementById("suche");
 const ortschaftFilterEl = document.getElementById("f-ortschaft-filter");
 const typFilterEl = document.getElementById("f-typ-filter");
 sucheEl.addEventListener("input", zeichneListe);
-ortschaftFilterEl.addEventListener("change", zeichneListe);
+ortschaftFilterEl.addEventListener("change", () => {
+  gewaehlteOrtschaft = ortschaftFilterEl.value;
+  zeichneListe();
+  ortschaftFilterAufKarteUebernehmen();
+});
 typFilterEl.addEventListener("change", zeichneListe);
 
 const ORTSCHAFT_GRUPPEN = APP_CONFIG.ortschaftGruppen;
 function ortschaftGruppe(o){ return ORTSCHAFT_GRUPPEN[o] || o; }
+
+// Gemeinsamer Ortschafts-Filter fuer Suchen und Karte, damit beide Ansichten
+// immer dieselbe Auswahl zeigen, egal in welcher sie geaendert wurde.
+let gewaehlteOrtschaft = "";
 
 function ortschaften(){
   return [...new Set(stellen.map(s => ortschaftGruppe((s.ortschaft || "").trim())).filter(Boolean))].sort((a,b) => a.localeCompare(b, "de"));
@@ -606,10 +650,9 @@ function typen(){
 
 function aktualisiereFilterListen(){
   const werte = ortschaften();
-  const aktuellerFilter = ortschaftFilterEl.value;
   ortschaftFilterEl.innerHTML = '<option value="">Alle Ortschaften</option>' +
     werte.map(o => '<option value="' + esc(o) + '">' + esc(o) + "</option>").join("");
-  if(werte.includes(aktuellerFilter)) ortschaftFilterEl.value = aktuellerFilter;
+  ortschaftFilterEl.value = werte.includes(gewaehlteOrtschaft) ? gewaehlteOrtschaft : "";
 
   const typWerte = typen();
   const aktuellerTypFilter = typFilterEl.value;
@@ -642,10 +685,13 @@ function zeichneListe(){
     const b = document.createElement("button");
     b.className = "item";
     const ortLage = [s.ortschaft, s.ort].filter(Boolean).join(" · ") || s.typ;
+    const typSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' + typIcon(s.typ) + '</svg>';
     b.innerHTML =
       '<span class="dist">' + (pos ? fmtDist(s._d) : "–") + '</span>' +
+      '<span class="item-typ" style="--c:' + typFarbe(s.typ) + '" title="' + esc(s.typ || "") + '">' + typSvg + '</span>' +
       '<span><span class="name">' + esc(s.nr || "ohne Nummer") + '</span>' +
       (s.dn ? '<span class="tag">' + esc(s.dn) + '</span>' : "") +
+      (s.menge ? '<span class="tag">' + esc(s.menge) + ' l/min</span>' : "") +
       '<div class="meta">' + esc(ortLage) + '</div></span>';
     b.addEventListener("click", () => zeigeDetails(s));
     listeEl.appendChild(b);
@@ -682,6 +728,20 @@ function zeigeDetails(s){
 document.getElementById("detail-ja").addEventListener("click", () => {
   document.getElementById("detailOverlay").classList.remove("on");
   if(detailStelle) oeffnePeil(detailStelle);
+});
+document.getElementById("detail-zentrieren").addEventListener("click", () => {
+  const s = detailStelle;
+  document.getElementById("detailOverlay").classList.remove("on");
+  if(!s) return;
+  gewaehlteOrtschaft = "";
+  ortschaftFilterEl.value = "";
+  document.getElementById("karte-ortschaft-filter").value = "";
+  document.getElementById("karte-typ-filter").value = "";
+  document.querySelector('nav button[data-view="v-karte"]').click();
+  hervorgehobenerNr = s.nr || null;
+  zeichneKarte();
+  setTimeout(() => { map.invalidateSize(); map.setView([s.lat, s.lon], 17); }, 60);
+  setTimeout(() => { hervorgehobenerNr = null; }, 4000);
 });
 document.getElementById("detail-nein").addEventListener("click", () => {
   document.getElementById("detailOverlay").classList.remove("on");
@@ -728,6 +788,56 @@ document.getElementById("detail-korrektur").addEventListener("click", () => {
     "Neue Position: " + pos.latitude.toFixed(5) + ", " + pos.longitude.toFixed(5) + "\n" +
     "Genauigkeit: ±" + genauigkeit + " m\n" +
     "Bisherige Position (App): " + detailStelle.lat.toFixed(5) + ", " + detailStelle.lon.toFixed(5);
+  sendePositionPerMail("Korrektur " + bezeichnung, text);
+});
+
+/* ---------- Angaben korrigieren (Ortschaft, Straße/Lage, Typ, Bemerkung) ----------
+   Ortschaft und Typ als feste Auswahl statt Freitext, damit bei der Übernahme
+   keine beliebigen Schreibweisen entstehen - dieselbe Grundliste wie in der
+   Hauptversion (dort TYP_GRUNDLISTE). */
+const ANG_TYP_LISTE = ["Unterflurhydrant","Überflurhydrant","Saugstelle","Löschwasserbrunnen","Zisterne","Defibrillator"];
+
+function fuelleAngabenAuswahl(selectEl, werte, aktuellerWert){
+  selectEl.innerHTML = '<option value="">– unverändert –</option>' +
+    werte.map(w => '<option value="' + w.replace(/"/g, "&quot;") + '">' + w + "</option>").join("");
+  selectEl.value = werte.includes(aktuellerWert) ? aktuellerWert : "";
+}
+
+document.getElementById("detail-angaben").addEventListener("click", () => {
+  if(!detailStelle) return;
+  document.getElementById("angabenZiel").textContent =
+    (detailStelle.nr || "ohne Nummer") + " · " + (detailStelle.typ || "");
+  const ortschaftListe = [...new Set(stellen.map(s => (s.ortschaft || "").trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b, "de"));
+  fuelleAngabenAuswahl(document.getElementById("ang-ortschaft"), ortschaftListe, (detailStelle.ortschaft || "").trim());
+  fuelleAngabenAuswahl(document.getElementById("ang-typ"), ANG_TYP_LISTE, (detailStelle.typ || "").trim());
+  document.getElementById("ang-strasse").value = detailStelle.ort || "";
+  document.getElementById("ang-bemerkung").value = detailStelle.bem || "";
+  document.getElementById("angabenOverlay").classList.add("on");
+});
+document.getElementById("angaben-abbrechen").addEventListener("click", () => {
+  document.getElementById("angabenOverlay").classList.remove("on");
+});
+document.getElementById("angaben-senden").addEventListener("click", () => {
+  if(!detailStelle) return;
+  const geaendert = [];
+  const pruefe = (feldId, bisher, label, mailLabel) => {
+    const neu = document.getElementById(feldId).value.trim();
+    if(neu && neu !== (bisher || "").trim()) geaendert.push(mailLabel + ": " + neu);
+  };
+  pruefe("ang-ortschaft", detailStelle.ortschaft, "Ortschaft", "Neue Ortschaft");
+  pruefe("ang-strasse", detailStelle.ort, "Straße/Lage", "Neue Straße/Lage");
+  pruefe("ang-typ", detailStelle.typ, "Typ", "Neuer Typ");
+  pruefe("ang-bemerkung", detailStelle.bem, "Bemerkung", "Neue Bemerkung");
+  if(!geaendert.length){
+    alert("Keine Änderung eingetragen.");
+    return;
+  }
+  const bezeichnung = [detailStelle.typ, detailStelle.nr || "ohne Nummer"].filter(Boolean).join(" ");
+  const text = "MELDUNG: Korrektur\n" +
+    "Ref: " + (detailStelle.nr || "") + "\n" +
+    "Bezeichnung: " + bezeichnung + "\n" +
+    geaendert.join("\n");
+  document.getElementById("angabenOverlay").classList.remove("on");
   sendePositionPerMail("Korrektur " + bezeichnung, text);
 });
 
@@ -887,13 +997,29 @@ function aktualisierePeilKarte(fit){
 /* ---------- Karte ---------- */
 let map = null, markerLayer = null;
 
+let kartePositionAufEigenenStandort = false; // Karte einmalig automatisch auf eigenen Standort zentrieren, sobald GPS vorliegt
+let eigenPositionMarker = null;
+function zeichneEigenePositionAufKarte(){
+  if(!map || !pos) return;
+  const ll = [pos.latitude, pos.longitude];
+  if(!eigenPositionMarker){
+    eigenPositionMarker = L.marker(ll, {
+      icon: L.divIcon({ className:"", html:'<div class="eigene-pos"></div>', iconSize:[16,16], iconAnchor:[8,8] }),
+      interactive:false, zIndexOffset:1000
+    }).addTo(map);
+  } else eigenPositionMarker.setLatLng(ll);
+}
+
 function initKarte(){
   if(map) return;
   L.Icon.Default.imagePath = "../vendor/images/";
-  map = L.map("map", { zoomControl:true }).setView(APP_CONFIG.kartenMitte, APP_CONFIG.kartenZoomUebersicht);
+  map = L.map("map", { zoomControl:true });
+  if(pos){ map.fitBounds(L.latLng(pos.latitude, pos.longitude).toBounds(2000)); kartePositionAufEigenenStandort = true; }
+  else map.setView(APP_CONFIG.kartenMitte, APP_CONFIG.kartenZoomUebersicht);
   grundkarteHinzufuegen(map);
   markerLayer = L.featureGroup().addTo(map);
   zeichneKarte();
+  zeichneEigenePositionAufKarte();
 }
 
 function typFarbe(typ){
@@ -932,12 +1058,12 @@ function typIcon(typ){
   return TYP_ICONS.sonstige;
 }
 
-function nrIcon(s){
+function nrIcon(s, hervorgehoben){
   const beschriftung = s.nr || (s.typ ? s.typ.slice(0, 3) + "." : "?");
   const farbe = typFarbe(s.typ);
   const svg = '<svg class="nr-icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' + typIcon(s.typ) + '</svg>';
   return L.divIcon({
-    className: "", html: '<div class="nr-marker-wrap" style="--pin:' + farbe + '"><div class="nr-marker">' + svg + esc(beschriftung) + '</div><div class="nr-spitze"></div></div>',
+    className: "", html: '<div class="nr-marker-wrap' + (hervorgehoben ? ' puls' : '') + '" style="--pin:' + farbe + '"><div class="nr-marker">' + svg + esc(beschriftung) + '</div><div class="nr-spitze"></div></div>',
     iconSize: [0, 0], iconAnchor: [0, 0]
   });
 }
@@ -945,12 +1071,20 @@ function nrIcon(s){
 function aktualisiereKarteOrtschaftFilter(){
   const el = document.getElementById("karte-ortschaft-filter");
   const werte = ortschaften();
-  const aktuell = el.value;
   const anzahl = {};
   stellen.forEach(s => { const o = ortschaftGruppe((s.ortschaft || "").trim()); if(o) anzahl[o] = (anzahl[o] || 0) + 1; });
   el.innerHTML = '<option value="">Alle Ortschaften (' + stellen.length + ')</option>' +
     werte.map(o => '<option value="' + esc(o) + '">' + esc(o) + ' (' + (anzahl[o] || 0) + ')</option>').join("");
-  if(werte.includes(aktuell)) el.value = aktuell;
+  el.value = werte.includes(gewaehlteOrtschaft) ? gewaehlteOrtschaft : "";
+}
+
+// Wird nach einer Aenderung im Suchen-Filter aufgerufen, damit die Karte
+// beim naechsten Oeffnen (oder sofort, falls schon initialisiert) dieselbe
+// Ortschaft zeigt.
+function ortschaftFilterAufKarteUebernehmen(){
+  const el = document.getElementById("karte-ortschaft-filter");
+  if([...el.options].some(o => o.value === gewaehlteOrtschaft)) el.value = gewaehlteOrtschaft;
+  if(markerLayer) karteNeuZeichnenUndZoomen();
 }
 
 function aktualisiereKarteTypFilter(){
@@ -964,6 +1098,8 @@ function aktualisiereKarteTypFilter(){
   if(werte.includes(aktuell)) el.value = aktuell;
 }
 
+let hervorgehobenerNr = null;
+
 function zeichneKarte(){
   if(!markerLayer) return;
   aktualisiereKarteOrtschaftFilter();
@@ -976,7 +1112,7 @@ function zeichneKarte(){
     if(typeof s.lat !== "number" || typeof s.lon !== "number") return;
     if(ortFilter && ortschaftGruppe((s.ortschaft || "").trim()) !== ortFilter) return;
     if(typFilter && (s.typ || "").trim() !== typFilter) return;
-    const m = L.marker([s.lat, s.lon], { icon: nrIcon(s) });
+    const m = L.marker([s.lat, s.lon], { icon: nrIcon(s, s.nr && s.nr === hervorgehobenerNr) });
     m.on("click", () => zeigeDetails(s));
     m.addTo(markerLayer);
   });
@@ -987,7 +1123,12 @@ function karteNeuZeichnenUndZoomen(){
   if(markerLayer.getLayers().length) map.fitBounds(markerLayer.getBounds(), { padding: [30, 30], maxZoom: 17 });
 }
 
-document.getElementById("karte-ortschaft-filter").addEventListener("change", karteNeuZeichnenUndZoomen);
+document.getElementById("karte-ortschaft-filter").addEventListener("change", () => {
+  gewaehlteOrtschaft = document.getElementById("karte-ortschaft-filter").value;
+  if([...ortschaftFilterEl.options].some(o => o.value === gewaehlteOrtschaft)) ortschaftFilterEl.value = gewaehlteOrtschaft;
+  zeichneListe();
+  karteNeuZeichnenUndZoomen();
+});
 document.getElementById("karte-typ-filter").addEventListener("change", karteNeuZeichnenUndZoomen);
 document.getElementById("karte-defi-btn").addEventListener("click", () => {
   const typEl = document.getElementById("karte-typ-filter");
@@ -1117,6 +1258,11 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("popstate", () => {
   if(document.getElementById("peil").classList.contains("on")){
     document.getElementById("zurueck").click();
+    zurueckWacheSetzen();
+    return;
+  }
+  if(document.getElementById("angabenOverlay").classList.contains("on")){
+    document.getElementById("angabenOverlay").classList.remove("on");
     zurueckWacheSetzen();
     return;
   }
