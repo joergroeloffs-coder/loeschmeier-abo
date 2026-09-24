@@ -1,6 +1,6 @@
 "use strict";
 importScripts("../config.js");
-const SHELL_CACHE = "nutzer-admin-shell-v21-foto-entfernt";
+const SHELL_CACHE = "nutzer-admin-shell-v22-firefox-layout";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",
