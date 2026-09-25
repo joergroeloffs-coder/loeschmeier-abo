@@ -1,0 +1,38 @@
+name: Worker deployen
+
+# Deployt den Cloudflare Worker automatisch bei jedem Push nach main, sobald
+# sich etwas unter worker/ aendert. Ersetzt das manuelle Kopieren von
+# worker/dist/bundle.js in den Cloudflare-Dashboard-Code-Editor.
+#
+# Einmalige Einrichtung, siehe worker/README-Abschnitt "Deploy": die
+# Secrets CLOUDFLARE_API_TOKEN (und ggf. CLOUDFLARE_ACCOUNT_ID) muessen im
+# GitHub-Repo unter Settings -> Secrets and variables -> Actions eingetragen
+# sein, sonst schlaegt der Job fehl.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-worker.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Tests und Deploy
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
