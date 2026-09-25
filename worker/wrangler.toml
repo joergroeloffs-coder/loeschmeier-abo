@@ -61,6 +61,6 @@ crons = ["0 3 * * *"]
 # funktioniert der automatische Deploy (npm run deploy in worker/) - siehe
 # deploy.mjs, das ohne diesen Eintrag bewusst abbricht, statt die im
 # Dashboard bestehende Bindung stillschweigend zu entfernen.
-# [[kv_namespaces]]
-# binding = "RATE_KV"
-# id = "<im Dashboard sichtbare Namespace-ID>"
+[[kv_namespaces]]
+binding = "RATE_KV"
+id = "972356190d3341168b7b28458513e224"
