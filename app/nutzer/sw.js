@@ -1,6 +1,6 @@
 "use strict";
 importScripts("../config.js");
-const SHELL_CACHE = "nutzer-shell-v23-karte-suche";
+const SHELL_CACHE = "nutzer-shell-v24-sticky-suche";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",
