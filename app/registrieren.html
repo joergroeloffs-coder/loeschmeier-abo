@@ -236,10 +236,6 @@
       <p class="lead">
         Digitale Karte der Wasserentnahmestellen und Defibrillatoren auf Föhr.
       </p>
-      <nav class="legal-actions" aria-label="Vertrag verwalten">
-        <a href="/kuendigen.html">Verträge hier kündigen</a>
-        <a href="/widerruf.html">Vertrag widerrufen</a>
-      </nav>
       <section class="card" aria-labelledby="offer-title">
         <h2 id="offer-title">Jahreszugang für Privatpersonen</h2>
         <p class="price" id="price">12,00 € <small>pro Jahr</small></p>
@@ -257,7 +253,7 @@
         <p class="notice" id="sales-notice">Verkaufsstatus wird geprüft …</p>
       </section>
       <section class="card" id="login-card">
-        <h2>1. Kundenkonto</h2>
+        <h2>1. Kundenkonto anlegen</h2>
         <label for="email">E-Mail-Adresse</label
         ><input id="email" type="email" autocomplete="email" required /><button
           class="btn"
@@ -365,10 +361,13 @@
           <div id="paypal-button-container" style="margin-top: 12px"></div>
         </div>
         <div class="status" id="order-status" role="status" aria-live="polite"></div>
-        <p id="after-order" hidden>
-          <a href="https://foehr.roewise.com/nutzer/">Löschbärt Föhr öffnen</a>
-          · <a href="/kundenbereich.html">Kundenbereich öffnen</a>
-        </p>
+        <div id="after-order" hidden>
+          <a class="btn" style="display:block;box-sizing:border-box;text-align:center;text-decoration:none"
+             href="https://foehr.roewise.com/nutzer/">Löschbärt Föhr öffnen</a>
+          <p style="text-align:center;margin-top:10px">
+            <a href="/kundenbereich.html">Kundenbereich öffnen</a>
+          </p>
+        </div>
         <button class="btn secondary" id="logout" type="button">
           Abmelden
         </button>
