@@ -29,9 +29,10 @@ self.APP_CONFIG = {
   // Auswahl/Filterung. Leer lassen ({}), wenn nicht gebraucht.
   ortschaftGruppen: {},
 
-  // Nur Nutzerversion: Cloudflare-Worker-Adresse für das Geräte-Limit
-  // (max. 2 Geräte pro Zugangsnummer). Leer lassen (null), wenn nicht gebraucht.
-  zugangsWorkerUrl: "https://wasserentnahme-zugang.joerg-roeloffs.workers.dev/",
+  // Nur Nutzerversion: Cloudflare-Worker-Adresse für das (alte, kosmetische)
+  // Zugangsnummer-Geräte-Limit. Bewusst deaktiviert (null): das echte
+  // Geräte-Limit läuft über aboWorkerUrl/zugriffspruefung.js.
+  zugangsWorkerUrl: null,
 
   // Zentrale Vertrags- und Zugriffsprüfung. Der Worker-Name stammt aus der
   // Zeit vor der Umbenennung; eine Änderung würde die bestehende Adresse und
