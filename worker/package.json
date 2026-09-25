@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node deploy.mjs",
+    "deploy:roh": "wrangler deploy",
     "test": "node --test test/*.test.js"
   },
   "type": "module",

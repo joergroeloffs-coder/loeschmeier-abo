@@ -55,9 +55,12 @@ ERLAUBTE_URSPRUENGE = ""
 [triggers]
 crons = ["0 3 * * *"]
 
-# KV-Namespace fuer Rate Limiting des Admin-Logins. Im Dashboard erstellt
-# und verknuepft (Settings -> Bindings -> KV Namespace, Variablenname
-# "RATE_KV") statt hier eingetragen, da ohne wrangler-CLI keine ID bekannt.
+# KV-Namespace fuer Rate Limiting des Admin-Logins. Die ID einmalig aus dem
+# Cloudflare-Dashboard eintragen (Workers & Pages -> KV -> Namespace RATE_KV
+# oeffnen), dann die folgenden zwei Zeilen einkommentieren. Erst danach
+# funktioniert der automatische Deploy (npm run deploy in worker/) - siehe
+# deploy.mjs, das ohne diesen Eintrag bewusst abbricht, statt die im
+# Dashboard bestehende Bindung stillschweigend zu entfernen.
 # [[kv_namespaces]]
 # binding = "RATE_KV"
 # id = "<im Dashboard sichtbare Namespace-ID>"

@@ -62,12 +62,31 @@ gesetzt werden.
 ```bash
 cd worker
 npm test
-python3 build_bundle.py
-node --check dist/bundle.js
 ```
 
-`worker/dist/bundle.js` ist nur für den Cloudflare-Dashboard-Editor gedacht
-und wird aus den Dateien unter `worker/src/` erzeugt.
+## Deploy
+
+Einmalig einrichten:
+
+```bash
+cd worker
+npm install
+npx wrangler login   # öffnet den Browser, verknüpft die CLI mit dem Cloudflare-Konto
+```
+
+Danach in `wrangler.toml` den `[[kv_namespaces]]`-Block für `RATE_KV`
+aktivieren (ID aus dem Dashboard, siehe Kommentar dort).
+
+Ab dann für jedes Deploy:
+
+```bash
+npm run deploy
+```
+
+Das führt automatisch die Tests aus und deployt danach direkt über die
+Cloudflare-API — kein manuelles Kopieren mehr in den Dashboard-Code-Editor.
+`worker/dist/bundle.js` und `build_bundle.py` sind nur noch ein Fallback für
+den Fall, dass `npx wrangler login` einmal nicht möglich ist.
 
 Die Rechtstexte sind auf den derzeit umgesetzten Ablauf zugeschnitten, ersetzen
 aber keine individuelle anwaltliche und steuerliche Prüfung vor einem Livegang.
