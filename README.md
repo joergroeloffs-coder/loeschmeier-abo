@@ -11,8 +11,11 @@ Die Leck-Version ist nicht Bestandteil dieses Projekts.
 
 ## Aufbau
 
-- `app/`: Registrieren, Bestellen, Kundenbereich, Kündigung, Widerruf,
-  Rechnungen und Rechtstexte
+- `app/nutzer/`, `app/nutzer-admin/`: die eigentliche Löschbärt-Föhr-App
+  (geschützte Version, läuft unter test.roewise.com)
+- Registrieren, Bestellen, Kundenbereich, Rechnung, Anmelden, Admin,
+  Kündigung, Widerruf und AGB sind in das Repo `roewise.com` umgezogen und
+  laufen dort direkt unter roewise.com
 - `worker/`: serverseitige PayPal-Prüfung, Webhooks, Zugangsprüfung,
   E-Mail-Warteschlange und Admin-API
 - `db/schema.sql`: bisheriges Basisschema
