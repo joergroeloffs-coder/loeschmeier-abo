@@ -197,6 +197,10 @@
         <span class="label">Tarif</span><span class="wert" id="w-tarif">–</span>
       </div>
       <div class="zeile">
+        <span class="label">Vertragsnummer</span
+        ><span class="wert" id="w-vertragsnummer">–</span>
+      </div>
+      <div class="zeile">
         <span class="label">Status</span
         ><span class="wert" id="w-status">–</span>
       </div>
@@ -352,6 +356,8 @@
         document.getElementById("abo-karte").style.display = "block";
         document.getElementById("w-tarif").textContent =
           abo.tariffs?.bezeichnung || "–";
+        document.getElementById("w-vertragsnummer").textContent =
+          abo.vertragsnummer || "–";
         const [text, art] = STATUS_TEXT[abo.status] || [abo.status, "warnung"];
         document.getElementById("w-status").innerHTML =
           `<span class="badge ${art}">${text}</span>`;

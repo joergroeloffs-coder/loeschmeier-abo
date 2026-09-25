@@ -52,6 +52,7 @@
     </div>
     <div style="text-align:right;font-size:13px">
       <div><b>Rechnungsnummer:</b> <span id="r-nummer"></span></div>
+      <div><b>Vertragsnummer:</b> <span id="r-vertragsnummer"></span></div>
       <div><b>Datum:</b> <span id="r-datum"></span></div>
     </div>
   </div>
@@ -96,7 +97,7 @@
 
     // RLS beschraenkt das Ergebnis automatisch auf eigene Rechnungen.
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/invoices?id=eq.${id}&select=*,subscriptions(tariffs(bezeichnung),customer_profiles(email))`,
+      `${SUPABASE_URL}/rest/v1/invoices?id=eq.${id}&select=*,subscriptions(vertragsnummer,tariffs(bezeichnung),customer_profiles(email))`,
       { headers }
     );
     const rechnungen = await res.json();
@@ -107,6 +108,7 @@
     const r = rechnungen[0];
 
     document.getElementById("r-nummer").textContent = r.rechnungsnummer;
+    document.getElementById("r-vertragsnummer").textContent = r.subscriptions?.vertragsnummer || "–";
     document.getElementById("r-datum").textContent = formatDatum(r.ausgestellt_am);
     document.getElementById("r-email").textContent = r.subscriptions?.customer_profiles?.email || "";
     document.getElementById("r-tarif").textContent = r.subscriptions?.tariffs?.bezeichnung || "Löschbärt – Abo";
