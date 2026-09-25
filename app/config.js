@@ -36,7 +36,7 @@ self.APP_CONFIG = {
   // Zentrale Vertrags- und Zugriffsprüfung. Der Worker-Name stammt aus der
   // Zeit vor der Umbenennung; eine Änderung würde die bestehende Adresse und
   // damit den laufenden Betrieb brechen.
-  aboWorkerUrl: "https://loeschmeier-abo-worker.joerg-roeloffs.workers.dev",
+  aboWorkerUrl: "https://loeschbaert-worker.joerg-roeloffs.workers.dev",
   supabaseUrl: "https://bmntahgtagjijfyeepju.supabase.co",
   // Öffentlicher anon-Schlüssel, für den Browser vorgesehen. Der
   // service_role-Schlüssel steht ausschließlich im Worker.
