@@ -1,6 +1,6 @@
 "use strict";
 importScripts("../config.js");
-const SHELL_CACHE = "nutzer-shell-v25-zugangsnr-aus";
+const SHELL_CACHE = "nutzer-shell-v26-email-anzeige";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",

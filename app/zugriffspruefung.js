@@ -223,9 +223,17 @@
   window.LOESCHBAERT_ZUGANG = { starten, stellenLaden, geraeteId, zwischenspeicherLeeren };
 
   // In dieser Fassung der App wird die Prüfung direkt beim Laden gestartet:
-  // Die Seiten binden nur diese Datei ein und rufen nichts weiter auf.
+  // Die Seiten binden nur diese Datei ein und rufen nichts weiter auf. Das
+  // Ergebnis (u.a. die angemeldete E-Mail-Adresse) wird zusaetzlich ueber
+  // window.LOESCHBAERT_ZUGANG.zugang und ein Event bereitgestellt, damit die
+  // Seite selbst z.B. die E-Mail-Adresse im Kopfbereich anzeigen kann.
   starten({
     betreiberErforderlich:
       EIGENES_SKRIPT && EIGENES_SKRIPT.dataset.betreiber === "ja",
+  }).then((ergebnis) => {
+    window.LOESCHBAERT_ZUGANG.zugang = ergebnis;
+    document.dispatchEvent(
+      new CustomEvent("loeschbaert-zugang-bereit", { detail: ergebnis })
+    );
   });
 })();

@@ -277,7 +277,10 @@
 
 <header>
   <div>
-    <h1>Löschbärt</h1>
+    <div style="display:flex;align-items:baseline;gap:8px;min-width:0">
+      <h1 style="flex:none;white-space:nowrap">Löschbärt</h1>
+      <span id="nutzer-email" style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto"></span>
+    </div>
     <div id="zugangsnummer" style="font-size:11px;color:var(--dim);margin-top:2px"></div>
     <div id="kachel-status" style="font-size:11px;color:var(--dim);margin-top:2px"></div>
   </div>
@@ -518,6 +521,14 @@ async function grundkarteHinzufuegen(leafletMap){
     if(el) el.textContent = "Zugang Nr. " + nr;
   } catch(e){}
 })();
+
+/* ---------- Angemeldete E-Mail-Adresse neben "Löschbärt" anzeigen (nur
+   Versionen mit echtem Kontosystem, also wenn zugriffspruefung.js laeuft) ---------- */
+document.addEventListener("loeschbaert-zugang-bereit", (ev) => {
+  const email = ev.detail?.session?.user?.email;
+  const el = document.getElementById("nutzer-email");
+  if(el && email) { el.textContent = email; el.title = email; }
+});
 
 /* ---------- Geräte-Limit: max. 2 Geräte pro Zugangsnummer (nur wenn
    APP_CONFIG.zugangsWorkerUrl gesetzt ist; sonst wirkungslos) ---------- */

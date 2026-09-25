@@ -270,7 +270,8 @@
 </div>
 
 <header>
-  <h1>Löschbärt</h1>
+  <h1 style="flex:none;white-space:nowrap">Löschbärt</h1>
+  <span id="nutzer-email" style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto"></span>
   <div id="gps" class="fix-bad"><b>kein GPS</b><span id="gpsdetail">warte auf Position</span></div>
 </header>
 
@@ -523,6 +524,14 @@
 <script src="vendor/leaflet-maplibre-gl.js"></script>
 <script>
 "use strict";
+
+/* ---------- Angemeldete E-Mail-Adresse neben "Löschbärt" anzeigen ---------- */
+document.addEventListener("loeschbaert-zugang-bereit", (ev) => {
+  const email = ev.detail?.session?.user?.email;
+  const el = document.getElementById("nutzer-email");
+  if(el && email) { el.textContent = email; el.title = email; }
+});
+
 const KEY = APP_CONFIG.speicherPraefix + ".haupt.v1";
 
 /* Grundkarte: PMTiles (offline, MapLibre) wenn APP_CONFIG.pmtilesDatei gesetzt
