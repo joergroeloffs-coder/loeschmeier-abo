@@ -367,6 +367,12 @@
         <div id="after-order" hidden>
           <a class="btn" style="display:block;box-sizing:border-box;text-align:center;text-decoration:none"
              href="https://foehr.roewise.com/nutzer/">Löschbärt Föhr öffnen</a>
+          <p style="text-align:center;margin-top:10px;font-size:12.5px;color:var(--muted)">
+            Für die Installation als App empfehlen wir Chrome oder Edge.
+            Ist dein Standardbrowser Firefox?
+            <a href="#" onclick="return adresseKopieren(this)">Adresse kopieren</a>
+            und in Chrome/Edge einfügen.
+          </p>
           <p style="text-align:center;margin-top:10px">
             <a href="/kundenbereich.html">Kundenbereich öffnen</a>
           </p>
@@ -411,6 +417,17 @@
         const el = document.getElementById(id);
         el.textContent = text;
         el.className = `status show ${kind}`;
+      }
+      function adresseKopieren(link) {
+        const text = link.textContent;
+        navigator.clipboard
+          .writeText("https://foehr.roewise.com/nutzer/")
+          .then(() => {
+            link.textContent = "Kopiert!";
+            setTimeout(() => (link.textContent = text), 2000);
+          })
+          .catch(() => {});
+        return false;
       }
       async function loadCatalog() {
         try {

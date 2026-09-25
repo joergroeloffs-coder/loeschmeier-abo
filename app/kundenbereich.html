@@ -222,6 +222,12 @@
         style="text-decoration: none; display: block; text-align: center"
         >Löschbärt Föhr öffnen</a
       >
+      <p style="text-align:center;margin-top:10px;font-size:12.5px;color:var(--muted)">
+        Für die Installation als App empfehlen wir Chrome oder Edge.
+        Ist dein Standardbrowser Firefox?
+        <a href="#" onclick="return adresseKopieren(this)">Adresse kopieren</a>
+        und in Chrome/Edge einfügen.
+      </p>
       <button class="btn gefahr" id="kuendigen-btn">Abo kündigen</button>
       <div class="status" id="abo-status"></div>
     </div>
@@ -300,6 +306,18 @@
       };
 
       let letzteGeraete = [];
+
+      function adresseKopieren(link) {
+        const text = link.textContent;
+        navigator.clipboard
+          .writeText("https://foehr.roewise.com/nutzer/")
+          .then(() => {
+            link.textContent = "Kopiert!";
+            setTimeout(() => (link.textContent = text), 2000);
+          })
+          .catch(() => {});
+        return false;
+      }
 
       function escapeHtml(text) {
         const div = document.createElement("div");
