@@ -299,6 +299,14 @@
         manuell_gesperrt: ["Gesperrt", "fehler"],
       };
 
+      let letzteGeraete = [];
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
       function formatDatum(iso) {
         if (!iso) return "–";
         return new Date(iso).toLocaleString("de-DE", {
@@ -391,6 +399,7 @@
           { headers },
         );
         const geraete = await geraeteRes.json();
+        letzteGeraete = geraete;
         const liste = document.getElementById("geraete-liste");
         if (geraete.length === 0) {
           liste.innerHTML =
@@ -401,10 +410,13 @@
               (g) => `
         <div class="geraet">
           <span>
-            <span style="display:block">${g.geraet_name || "Unbekanntes Gerät"}</span>
+            <span style="display:block">${escapeHtml(g.geraet_name || "Unbekanntes Gerät")}</span>
             <span class="sub">zuletzt aktiv: ${formatDatum(g.zuletzt_aktiv)}</span>
           </span>
-          <button class="btn gefahr" style="width:auto;margin:0;padding:8px 12px;font-size:12px" onclick="geraetEntfernen('${g.id}')">Entfernen</button>
+          <span style="display:flex;gap:6px">
+            <button class="btn" style="width:auto;margin:0;padding:8px 12px;font-size:12px" onclick="geraetUmbenennen('${g.id}')">Umbenennen</button>
+            <button class="btn gefahr" style="width:auto;margin:0;padding:8px 12px;font-size:12px" onclick="geraetEntfernen('${g.id}')">Entfernen</button>
+          </span>
         </div>
       `,
             )
@@ -438,6 +450,33 @@
             .join("");
         }
         document.getElementById("rechnungen-karte").style.display = "block";
+      }
+
+      async function geraetUmbenennen(deviceId) {
+        const bisheriger =
+          letzteGeraete.find((g) => g.id === deviceId)?.geraet_name || "";
+        const name = prompt(
+          "Name für dieses Gerät (z.B. \"Handy Chrome\" oder \"Handy Firefox\"):",
+          bisheriger,
+        );
+        if (name === null || !name.trim()) return;
+
+        const {
+          data: { session },
+        } = await sb.auth.getSession();
+        const res = await fetch(WORKER_URL + "/api/geraet-umbenennen", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + session.access_token,
+          },
+          body: JSON.stringify({ device_id: deviceId, name: name.trim() }),
+        });
+        if (res.ok) {
+          laden();
+        } else {
+          alert("Gerät konnte nicht umbenannt werden.");
+        }
       }
 
       async function geraetEntfernen(deviceId) {

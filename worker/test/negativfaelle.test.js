@@ -374,8 +374,8 @@ test("Zugriff: drittes Geraet wird abgewiesen, bekanntes Geraet nicht", async ()
       customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
       subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "aktiv", bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 2 } }],
       devices: [
-        { id: "g1", customer_id: "kunde-1", geraet_name: "11111111-1111-4111-8111-111111111111" },
-        { id: "g2", customer_id: "kunde-1", geraet_name: "22222222-2222-4222-8222-222222222222" },
+        { id: "g1", customer_id: "kunde-1", geraet_kennung: "11111111-1111-4111-8111-111111111111" },
+        { id: "g2", customer_id: "kunde-1", geraet_kennung: "22222222-2222-4222-8222-222222222222" },
       ],
     },
   });

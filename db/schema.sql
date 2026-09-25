@@ -77,12 +77,14 @@ create table invoices (
 create table devices (
   id uuid primary key default uuid_generate_v4(),
   customer_id uuid not null references customer_profiles(id) on delete cascade,
-  geraet_name text,
+  geraet_kennung text not null,          -- technische Kennung aus localStorage, unveraenderlich
+  geraet_name text,                      -- vom Kunden vergebbarer Anzeigename
   erstmals_gesehen timestamptz not null default now(),
   zuletzt_aktiv timestamptz not null default now(),
   bestaetigt boolean not null default false
 );
 create index on devices (customer_id);
+create unique index on devices (customer_id, geraet_kennung);
 
 -- ---------- Sitzungen ----------
 create table sessions (

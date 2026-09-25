@@ -399,6 +399,9 @@ export default {
       if (url.pathname === "/api/geraet-entfernen" && request.method === "POST") {
         return await kundeEntferntGeraet(request, env);
       }
+      if (url.pathname === "/api/geraet-umbenennen" && request.method === "POST") {
+        return await kundeBenenntGeraetUm(request, env);
+      }
       if (url.pathname === "/api/abo-anlegen" && request.method === "POST") {
         return await aboAnlegen(request, env);
       }
@@ -1137,14 +1140,14 @@ async function entscheideZugriff(request, env) {
   const maxGeraete = abo.tariffs?.max_geraete ?? STANDARD_MAX_GERAETE;
   const geraete = await db.select(
     "devices",
-    `customer_id=eq.${filterWert(customerId)}&select=id,geraet_name`
+    `customer_id=eq.${filterWert(customerId)}&select=id,geraet_kennung`
   );
-  const bekannt = geraete.find((g) => g.geraet_name === geraetId);
+  const bekannt = geraete.find((g) => g.geraet_kennung === geraetId);
   if (!bekannt) {
     if (geraete.length >= maxGeraete) {
       return { erlaubt: false, grund: "geraetelimit_erreicht", maxGeraete };
     }
-    await db.insert("devices", [{ customer_id: customerId, geraet_name: geraetId, bestaetigt: true }]);
+    await db.insert("devices", [{ customer_id: customerId, geraet_kennung: geraetId, bestaetigt: true }]);
   } else {
     await db.update("devices", `id=eq.${filterWert(bekannt.id)}`, {
       zuletzt_aktiv: new Date().toISOString(),
@@ -1448,6 +1451,35 @@ async function kundeEntferntGeraet(request, env) {
 
   await db.delete("devices", `id=eq.${filterWert(body.device_id)}`);
   return json({ status: "entfernt" });
+}
+
+// ---------- Geraet durch Kunden umbenennen ----------
+// Erlaubt Kunden, Geraete-Eintraege (die als UUID gespeichert werden) mit
+// einem erkennbaren Namen zu versehen, z.B. um zwischen Browsern auf
+// demselben physischen Geraet zu unterscheiden.
+
+async function kundeBenenntGeraetUm(request, env) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "");
+  const authUserId = await pruefeNutzerToken(env, accessToken);
+  if (!authUserId) return json({ fehler: "nicht_angemeldet" }, 401);
+
+  const body = await request.json().catch(() => ({}));
+  const name = typeof body.name === "string" ? body.name.trim().slice(0, 60) : "";
+  if (!istUuid(body.device_id) || !name) return json({ fehler: "fehlende_angaben" }, 400);
+
+  const db = supabaseClient(env);
+  const profile = await db.select("customer_profiles", `auth_user_id=eq.${filterWert(authUserId)}&select=id`);
+  if (profile.length === 0) return json({ fehler: "kein_profil" }, 404);
+
+  const geraete = await db.select(
+    "devices",
+    `id=eq.${filterWert(body.device_id)}&customer_id=eq.${filterWert(profile[0].id)}&select=id`
+  );
+  if (geraete.length === 0) return json({ fehler: "geraet_nicht_gefunden" }, 404);
+
+  await db.update("devices", `id=eq.${filterWert(body.device_id)}`, { geraet_name: name });
+  return json({ status: "umbenannt" });
 }
 
 // ---------- Rechnungsstellung ----------
