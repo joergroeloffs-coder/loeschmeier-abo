@@ -313,8 +313,7 @@
           data: { session },
         } = await sb.auth.getSession();
         if (!session) {
-          document.getElementById("eingeloggt-als").textContent =
-            "Nicht angemeldet — bitte zuerst über die Registrierungsseite anmelden.";
+          window.location.href = "/anmelden.html";
           return;
         }
         document.getElementById("eingeloggt-als").textContent =
@@ -503,7 +502,7 @@
         .getElementById("abmelden-btn")
         .addEventListener("click", async () => {
           await sb.auth.signOut();
-          window.location.href = "/registrieren.html";
+          window.location.href = "/anmelden.html";
         });
 
       laden();
