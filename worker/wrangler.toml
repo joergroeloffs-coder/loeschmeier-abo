@@ -14,7 +14,7 @@ TRANSACTIONAL_FROM = "Roewise <noreply@roewise.com>"
 
 # Adresse der oeffentlichen Seiten. Steht in allen Vertrags-, Kuendigungs- und
 # Widerrufsbestaetigungen. Beim Domainwechsel nur hier aendern.
-OEFFENTLICHE_BASIS_URL = "https://test.roewise.com"
+OEFFENTLICHE_BASIS_URL = "https://roewise.com"
 
 # Empfaenger fuer Betreiber-Benachrichtigungen (eingegangene Kuendigungen und
 # Widerrufe, besonders die Faelle mit "manuell_pruefen").

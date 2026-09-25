@@ -149,7 +149,7 @@ function istPaypalKennung(wert) {
 // Adresse der oeffentlichen Seiten. Steht in einer Variablen, damit der
 // Domainwechsel vor dem Livegang an einer einzigen Stelle passiert.
 function basisUrl(env) {
-  return String(env.OEFFENTLICHE_BASIS_URL || "https://test.roewise.com").replace(/\/+$/, "");
+  return String(env.OEFFENTLICHE_BASIS_URL || "https://roewise.com").replace(/\/+$/, "");
 }
 
 function verkaufBereit(env) {
