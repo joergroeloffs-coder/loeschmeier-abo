@@ -1,6 +1,6 @@
 "use strict";
 importScripts("../config.js");
-const SHELL_CACHE = "nutzer-shell-v30-theme";
+const SHELL_CACHE = "nutzer-shell-v31-testphase-31-10";
 const TILE_CACHE = "osm-kacheln-v1";
 const SHELL_FILES = [
   "./",
