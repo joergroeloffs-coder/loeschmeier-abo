@@ -1,5 +1,5 @@
 -- Erst ausführen, nachdem setup/paypal_plan_erstellen.py den neuen festen
--- 12-Euro-Jahresplan erzeugt hat. Den Platzhalter vorher ersetzen.
+-- 10-Euro-Jahresplan erzeugt hat. Den Platzhalter vorher ersetzen.
 do $$
 declare
   neue_plan_id text := 'HIER_NEUE_PAYPAL_PLAN_ID_EINTRAGEN';

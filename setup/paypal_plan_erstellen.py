@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Legt einmalig ein PayPal-Produkt + einen jährlich wiederkehrenden Preisplan
-in der Sandbox an ("Löschbärt Föhr", 12 EUR/Jahr). Läuft lokal bei dir - dein PayPal-Secret
+in der Sandbox an ("Löschbärt Föhr", 10 EUR/Jahr). Läuft lokal bei dir - dein PayPal-Secret
 bleibt auf deinem Rechner und wird nirgendwo hochgeladen.
 
 Vorbereitung:
@@ -11,7 +11,8 @@ Vorbereitung:
      Apps & Credentials -> Sandbox -> deine App.
 
 Nutzung:
-  python3 setup/paypal_plan_erstellen.py
+  python3 setup/paypal_plan_erstellen.py        (Sandbox)
+  python3 setup/paypal_plan_erstellen.py live   (Live, echte Zugangsdaten)
 
 Am Ende wird eine Plan-ID ausgegeben (Format P-XXXXXXXXXXXXXXXXXXXX).
 Die ist NICHT geheim - die brauche ich, um den Kauf-Button zu bauen.
@@ -25,7 +26,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ZUGANGSDATEN_PFAD = Path(__file__).resolve().parent / "paypal_zugangsdaten.json"
-API_BASE = "https://api-m.sandbox.paypal.com"
+LIVE = len(sys.argv) > 1 and sys.argv[1] == "live"
+API_BASE = "https://api-m.paypal.com" if LIVE else "https://api-m.sandbox.paypal.com"
 
 
 def anfrage(pfad, methode="GET", body=None, token=None, auth=None):
@@ -55,6 +57,7 @@ def main():
         print('Bitte Datei anlegen mit Inhalt: {"client_id": "...", "secret": "..."}')
         sys.exit(1)
 
+    print("MODUS:", "LIVE (echtes Geld)" if LIVE else "Sandbox")
     zugang = json.loads(ZUGANGSDATEN_PFAD.read_text(encoding="utf-8"))
 
     print("Hole Zugriffstoken ...")
@@ -87,11 +90,11 @@ def main():
     produkt_id = produkt["id"]
     print(f"  Produkt-ID: {produkt_id}")
 
-    print("Lege Preisplan an (12 EUR / Jahr, automatische Verlängerung) ...")
+    print("Lege Preisplan an (10 EUR / Jahr, automatische Verlängerung) ...")
     # PayPal lehnt "description" ab 128 Zeichen mit INVALID_STRING_MAX_LENGTH
     # ab - lieber hier vorher pruefen als erst bei PayPal einen kryptischen
     # Fehler bekommen.
-    beschreibung = "12 EUR pro Jahr; 12 Monate Mindestlaufzeit, danach Verlaengerung um je 12 Monate, kuendbar mit 6 Wochen Frist zum Laufzeitende"
+    beschreibung = "10 EUR pro Jahr; 12 Monate Mindestlaufzeit, danach Verlaengerung um je 12 Monate, kuendbar mit 6 Wochen Frist zum Laufzeitende"
     assert len(beschreibung) <= 127, f"description zu lang fuer PayPal: {len(beschreibung)} Zeichen (max. 127)"
     plan = anfrage(
         "/v1/billing/plans",
@@ -107,7 +110,7 @@ def main():
                     "sequence": 1,
                     "total_cycles": 0,
                     "pricing_scheme": {
-                        "fixed_price": {"value": "12.00", "currency_code": "EUR"}
+                        "fixed_price": {"value": "10.00", "currency_code": "EUR"}
                     },
                 }
             ],
