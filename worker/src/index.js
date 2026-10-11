@@ -1044,16 +1044,18 @@ async function aboAnlegen(request, env) {
     sofortiger_beginn: body.sofortiger_beginn,
   }]);
 
+  const preisText = `${(tarife[0].preis_cent / 100).toFixed(2).replace(".", ",")} ${tarife[0].waehrung}`;
+  const datumText = (d) => d.toLocaleString("de-DE", { timeZone: "Europe/Berlin", dateStyle: "long", timeStyle: "short" }) + " Uhr";
   const confirmation = [
     "Vertragsbestätigung – Löschbärt Föhr Jahreszugang",
     "",
     `Vertragsnummer: ${contractNumber}`,
     `Tarif: ${tarife[0].bezeichnung}`,
-    `Preis: ${(tarife[0].preis_cent / 100).toFixed(2).replace(".", ",")} ${tarife[0].waehrung} je 12 Monate`,
-    `Vertragsschluss: ${now.toISOString()}`,
-    `Leistungsbeginn: ${performanceStart.toISOString()}`,
-    `Mindestlaufzeit bis: ${contractEnd.toISOString()}`,
-    "Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird. Die Vergütung von 12,00 EUR wird jeweils für zwölf Monate im Voraus berechnet. Für eine ordentliche Kündigung erfolgt keine anteilige Erstattung; das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
+    `Preis: ${preisText} je 12 Monate`,
+    `Vertragsschluss: ${datumText(now)}`,
+    `Leistungsbeginn: ${datumText(performanceStart)}`,
+    `Mindestlaufzeit bis: ${datumText(contractEnd)}`,
+    `Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird. Die Vergütung von ${preisText} wird jeweils für zwölf Monate im Voraus berechnet. Für eine ordentliche Kündigung erfolgt keine anteilige Erstattung; das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.`,
     `Rechtstexte-Version: ${LEGAL_VERSION}`,
     body.sofortiger_beginn
       ? "Sie haben ausdrücklich verlangt, dass die Leistung vor Ablauf der Widerrufsfrist beginnt."
