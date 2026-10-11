@@ -52,6 +52,15 @@ export async function holeAboDetails(env, paypalSubscriptionId) {
   return res.json();
 }
 
+async function fehlerDetails(res) {
+  try {
+    const text = await res.text();
+    return String(text || "").slice(0, 600);
+  } catch {
+    return "";
+  }
+}
+
 export async function kuendigeAbo(env, paypalSubscriptionId, grund) {
   const token = await holeZugriffstoken(env);
   const res = await fetch(
@@ -66,6 +75,9 @@ export async function kuendigeAbo(env, paypalSubscriptionId, grund) {
     }
   );
   // 204 = erfolgreich gekuendigt
+  if (res.status !== 204) {
+    console.error(`PayPal-Kuendigung fehlgeschlagen: ${res.status} ${await fehlerDetails(res)}`);
+  }
   return res.status === 204;
 }
 
@@ -81,6 +93,6 @@ export async function erstatteZahlung(env, paypalSaleId, betrag = null) {
       amount: { total: betrag.value, currency: betrag.currency },
     } : {}),
   });
-  if (!res.ok) throw new Error(`PayPal-Erstattung fehlgeschlagen: ${res.status}`);
+  if (!res.ok) throw new Error(`PayPal-Erstattung fehlgeschlagen: ${res.status} ${await fehlerDetails(res)}`);
   return res.json();
 }
