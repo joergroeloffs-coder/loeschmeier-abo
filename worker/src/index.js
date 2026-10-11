@@ -674,7 +674,12 @@ async function verarbeiteEreignis(db, env, ereignis) {
       }
       const rechnungen = await db.select("invoices", `payment_id=eq.${zahlungen[0].id}&select=id`);
       if (rechnungen.length === 0) {
-        await erstelleRechnung(db, abo.id, zahlungen[0].id, betragCent);
+        const rechnung = await erstelleRechnung(db, abo.id, zahlungen[0].id, betragCent);
+        try {
+          await sendeRechnungPerMail(db, env, abo.id, rechnung);
+        } catch (error) {
+          console.error("Rechnungsmail konnte nicht vorgemerkt werden", String(error));
+        }
       }
 
       // Aktiviert das Abo (falls es aus Kulanzzeit/ueberfaellig kam) und
@@ -1201,7 +1206,7 @@ async function kundeBenenntGeraetUm(request, env) {
 async function erstelleRechnung(db, subscriptionId, paymentId, betragCent) {
   const rechnungsnummer = await db.rpc("next_invoice_number");
 
-  await db.insert("invoices", [
+  const rows = await db.insert("invoices", [
     {
       subscription_id: subscriptionId,
       payment_id: paymentId,
@@ -1209,6 +1214,45 @@ async function erstelleRechnung(db, subscriptionId, paymentId, betragCent) {
       betrag_cent: betragCent,
     },
   ]);
+  return rows[0];
+}
+
+async function sendeRechnungPerMail(db, env, subscriptionId, rechnung) {
+  const abos = await db.select(
+    "subscriptions",
+    `id=eq.${filterWert(subscriptionId)}&select=customer_id,vertragsnummer,tariffs(bezeichnung),customer_profiles(email)`
+  );
+  const abo = abos[0];
+  const to = abo?.customer_profiles?.email;
+  if (!to) return;
+  const datum = new Date(rechnung.ausgestellt_am || Date.now()).toLocaleDateString("de-DE", {
+    timeZone: "Europe/Berlin",
+    dateStyle: "long",
+  });
+  const betrag = `${(rechnung.betrag_cent / 100).toFixed(2).replace(".", ",")} EUR`;
+  const text = [
+    "Kleinbetragsrechnung",
+    "",
+    "Jörg Roeloffs, Scholkwai 86, 25938 Süderende",
+    "wasserentnahme-foehr@web.de",
+    "",
+    `Rechnungsnummer: ${rechnung.rechnungsnummer}`,
+    `Vertragsnummer: ${abo.vertragsnummer || "-"}`,
+    `Rechnungsdatum: ${datum}`,
+    `Rechnungsempfänger: ${to}`,
+    "",
+    `Leistung: ${abo.tariffs?.bezeichnung || "Löschbärt Föhr – Jahreszugang"}`,
+    `Gesamtbetrag: ${betrag}`,
+    "Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
+    "",
+    `Die Rechnung steht außerdem in Ihrem Kundenbereich bereit: ${basisUrl(env)}/kundenbereich.html`,
+  ].join("\n");
+  await nachrichtVormerken(db, env, {
+    customerId: abo.customer_id,
+    to,
+    subject: `Rechnung ${rechnung.rechnungsnummer}`,
+    text,
+  });
 }
 
 // ---------- Taeglicher Abgleich (faengt ausgefallene Webhooks ab) ----------
