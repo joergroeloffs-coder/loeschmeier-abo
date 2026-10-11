@@ -51,6 +51,11 @@ ERLAUBTE_URSPRUENGE = ""
 # SALES_ENABLED erst nach Migration, Jahresplan, Webhook- und E-Mail-Test auf
 # "true" stellen. Bis dahin zeigt die Seite das Angebot ohne Kaufmöglichkeit.
 
+# Logs im Cloudflare-Dashboard (Observability), damit Fehler bei PayPal-Aufrufen
+# nachvollziehbar sind. Free-Plan: 200.000 Ereignisse pro Tag.
+[observability]
+enabled = true
+
 # Taeglicher Abgleich mit PayPal (faengt ausgefallene Webhooks ab)
 [triggers]
 crons = ["0 3 * * *"]
