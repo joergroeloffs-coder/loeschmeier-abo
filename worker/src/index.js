@@ -715,7 +715,12 @@ async function verarbeiteEreignis(db, env, ereignis) {
     case "BILLING.SUBSCRIPTION.SUSPENDED":
     case "BILLING.SUBSCRIPTION.EXPIRED": {
       const neuerStatus = typ.endsWith("EXPIRED") ? "abgelaufen" : "gesperrt";
-      await db.update("subscriptions", `paypal_subscription_id=eq.${filterWert(resource.id)}`, {
+      const aktuell = await db.select(
+        "subscriptions",
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,status`
+      );
+      if (aktuell.length === 0 || ENDZUSTAENDE.has(aktuell[0].status)) break;
+      await db.update("subscriptions", `id=eq.${filterWert(aktuell[0].id)}`, {
         status: neuerStatus,
         aktualisiert_am: new Date().toISOString(),
       });
@@ -728,12 +733,16 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // aber der Status zeigt "gekuendigt".
       const abos = await db.select(
         "subscriptions",
-        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,bezahlt_bis`
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,bezahlt_bis,status,gekuendigt_am`
       );
       if (abos.length === 0) break;
+      // Unsere eigene Kuendigung bei PayPal loest diesen Webhook ebenfalls aus.
+      // Ein bereits beendeter Vertrag (Widerruf, Erstattung, Ablauf) darf dadurch
+      // nicht wieder auf "gekuendigt, laeuft bis Vertragsende" zurueckfallen.
+      if (ENDZUSTAENDE.has(abos[0].status)) break;
       await db.update("subscriptions", `id=eq.${abos[0].id}`, {
         status: "gekuendigt_zum_ende",
-        gekuendigt_am: new Date().toISOString(),
+        gekuendigt_am: abos[0].gekuendigt_am || new Date().toISOString(),
         aktualisiert_am: new Date().toISOString(),
       });
       break;
@@ -745,13 +754,25 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // payments-Tabelle (subscription_id war dort schon beim urspruenglichen
       // Zahlungseingang gespeichert).
       const urspruenglicheSaleId = resource.sale_id || resource.parent_payment;
-      const aktualisiertePayments = await db.update(
+      const vorhandene = await db.select(
         "payments",
-        `paypal_capture_id=eq.${filterWert(urspruenglicheSaleId)}`,
-        { status: "erstattet", erstattet_am: new Date().toISOString() }
+        `paypal_capture_id=eq.${filterWert(urspruenglicheSaleId)}&select=id,subscription_id,betrag_cent,erstattet_cent`
       );
-      if (aktualisiertePayments.length > 0) {
-        await db.update("subscriptions", `id=eq.${aktualisiertePayments[0].subscription_id}`, {
+      if (vorhandene.length === 0) break;
+      const zahlung = vorhandene[0];
+      // PayPal meldet den Betrag dieser einen Erstattung. Eine Teilerstattung
+      // (z.B. anteilig bei ausserordentlicher Kuendigung) beendet den Vertrag nicht.
+      const erstattungCent = Math.round(parseFloat(resource.amount?.total || "0") * 100);
+      const bereits = zahlung.erstattet_cent || 0;
+      const gesamt = Math.min(zahlung.betrag_cent, Math.max(bereits, erstattungCent));
+      const voll = gesamt >= zahlung.betrag_cent;
+      await db.update("payments", `id=eq.${filterWert(zahlung.id)}`, {
+        status: voll ? "erstattet" : "teilweise_erstattet",
+        erstattet_cent: gesamt,
+        erstattet_am: new Date().toISOString(),
+      });
+      if (voll) {
+        await db.update("subscriptions", `id=eq.${filterWert(zahlung.subscription_id)}`, {
           status: "erstattet",
           aktualisiert_am: new Date().toISOString(),
         });
@@ -769,6 +790,8 @@ async function verarbeiteEreignis(db, env, ereignis) {
 // ---------- Zugriffspruefung (von der App bei jeder geschuetzten Aktion aufgerufen) ----------
 
 const ERLAUBTE_STATUS = new Set(["aktiv", "kulanzzeit", "gekuendigt_zum_ende"]);
+// Vertraege in diesen Zustaenden werden von PayPal-Webhooks nicht mehr veraendert.
+const ENDZUSTAENDE = new Set(["erstattet", "widerrufen", "abgelaufen"]);
 const STANDARD_MAX_GERAETE = 2;
 
 // Zentrale Entscheidung "darf dieses Geraet dieses Konto nutzen?". Sie wird
@@ -1068,7 +1091,7 @@ async function aboAnlegen(request, env) {
     "",
     "Anbieter: Jörg Roeloffs, Scholkwai 86, 25938 Süderende, Telefon 01724149356, wasserentnahme-foehr@web.de",
     "Leistung: Browserbasierte Föhr-Karte mit Wasserentnahmestellen und Defibrillatoren; Nutzung auf bis zu zwei registrierten Geräten.",
-    "Technische Voraussetzungen: aktueller Browser und Internetzugang; nach dem ersten Laden sind Teile der Anwendung offline nutzbar.",
+    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist, und lässt sich ohne Internetverbindung nicht öffnen.",
     "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
     "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
     `Kündigung: im Kundenbereich oder ohne Anmeldung unter ${basisUrl(env)}/kuendigen.html.`,
@@ -1330,7 +1353,13 @@ async function rateLimitUeberschritten(request, env) {
 
 function adminAutorisiert(request, env) {
   const passwort = request.headers.get("X-Admin-Passwort") || "";
-  return env.ADMIN_PASSWORT && passwort === env.ADMIN_PASSWORT;
+  if (!env.ADMIN_PASSWORT) return false;
+  const a = new TextEncoder().encode(passwort);
+  const b = new TextEncoder().encode(env.ADMIN_PASSWORT);
+  // Laenge geht in den Vergleich ein, der Inhalt wird aber ohne fruehen Abbruch geprueft.
+  let unterschied = a.length ^ b.length;
+  for (let i = 0; i < b.length; i++) unterschied |= (a[i] ?? 0) ^ b[i];
+  return unterschied === 0;
 }
 
 async function adminAnfrage(request, env, url) {

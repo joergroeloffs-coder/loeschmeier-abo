@@ -1068,3 +1068,51 @@ test("Admin: Erklaerungen-Liste liefert Kuendigungen/Widerrufe fuer die Uebersic
   assert.equal(liste.length, 1);
   assert.equal(liste[0].verarbeitungsstatus, "erstattet");
 });
+
+test("Webhook: eigene PayPal-Kuendigung ueberschreibt einen Widerruf nicht", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "widerrufen", gekuendigt_am: "2026-10-11T18:00:00Z" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id: "EV-C1", event_type: "BILLING.SUBSCRIPTION.CANCELLED", resource: { id: "I-ABC" } },
+  }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.subscriptions[0].status, "widerrufen");
+});
+
+test("Webhook: PayPal-Kuendigung eines aktiven Vertrags setzt gekuendigt_zum_ende", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "aktiv" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  await worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id: "EV-C2", event_type: "BILLING.SUBSCRIPTION.CANCELLED", resource: { id: "I-ABC" } },
+  }), ENV);
+  assert.equal(daten.subscriptions[0].status, "gekuendigt_zum_ende");
+});
+
+test("Webhook: Teilerstattung beendet den Vertrag nicht, Vollerstattung schon", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "gekuendigt_zum_ende" }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", paypal_capture_id: "SALE-1", betrag_cent: 1000, status: "erfolgreich" }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const senden = (id, betrag) => worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id, event_type: "PAYMENT.SALE.REFUNDED", resource: { id: "R-" + id, sale_id: "SALE-1", amount: { total: betrag, currency: "EUR" } } },
+  }), ENV);
+
+  assert.equal((await senden("EV-R1", "4.00")).status, 200);
+  assert.equal(daten.payments[0].status, "teilweise_erstattet");
+  assert.equal(daten.payments[0].erstattet_cent, 400);
+  assert.equal(daten.subscriptions[0].status, "gekuendigt_zum_ende");
+
+  assert.equal((await senden("EV-R2", "10.00")).status, 200);
+  assert.equal(daten.payments[0].status, "erstattet");
+  assert.equal(daten.subscriptions[0].status, "erstattet");
+});
