@@ -1,3 +1,6 @@
+-- ACHTUNG: Nicht erneut ausführen, wenn der Verkauf läuft. Der update-Block auf
+-- "tariffs" weiter unten setzt den Preis zurück und löscht paypal_plan_id; der
+-- Kauf-Button verschwindet dann. Aktueller Preis: 10,00 EUR (1000 Cent).
 -- Verkaufsplattform Föhr: Verträge, Erklärungen, E-Mail-Warteschlange und
 -- parallelitätssichere Rechnungsnummern.
 -- Vor dem Livegang einmalig im Supabase SQL-Editor ausführen.
@@ -127,7 +130,7 @@ set code = 'foehr-jahr',
     slug = 'loeschbaert-foehr-privat',
     bezeichnung = 'Löschbärt Föhr – Jahreszugang',
     beschreibung = 'Digitale Wasserentnahmestellen- und Defibrillatorenkarte für Föhr',
-    preis_cent = 1200,
+    preis_cent = 1000,
     waehrung = 'EUR',
     intervall = '12_monate',
     zielgruppe = 'verbraucher',
