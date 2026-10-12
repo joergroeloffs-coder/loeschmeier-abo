@@ -830,7 +830,7 @@ async function entscheideZugriff(request, env) {
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${filterWert(customerId)}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am,tariffs(max_geraete)&order=erstellt_am.desc&limit=1`
+    `customer_id=eq.${filterWert(customerId)}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am,max_geraete_override,tariffs(max_geraete)&order=erstellt_am.desc&limit=1`
   );
   if (abos.length === 0) return { erlaubt: false, grund: "kein_abo" };
   const abo = abos[0];
@@ -852,7 +852,7 @@ async function entscheideZugriff(request, env) {
   }
 
   // Geraet registrieren/aktualisieren, Geraetelimit aus dem gebuchten Tarif.
-  const maxGeraete = abo.tariffs?.max_geraete ?? STANDARD_MAX_GERAETE;
+  const maxGeraete = abo.max_geraete_override ?? abo.tariffs?.max_geraete ?? STANDARD_MAX_GERAETE;
   const geraete = await db.select(
     "devices",
     `customer_id=eq.${filterWert(customerId)}&select=id,geraet_kennung`
@@ -1350,9 +1350,16 @@ async function adminAnfrage(request, env, url) {
   if (pfad === "/api/admin/kunden" && request.method === "GET") {
     const kunden = await db.select(
       "subscriptions",
-      "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent,intervall,zielgruppe),payments(status,betrag_cent,zeitpunkt,paypal_capture_id)&order=erstellt_am.desc&payments.order=zeitpunkt.desc"
+      "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,max_geraete_override,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent,intervall,zielgruppe,max_geraete),payments(status,betrag_cent,zeitpunkt,paypal_capture_id)&order=erstellt_am.desc&payments.order=zeitpunkt.desc"
     );
     return json(kunden);
+  }
+  if (pfad === "/api/admin/tarife" && request.method === "GET") {
+    const tarife = await db.select(
+      "tariffs",
+      "aktiv=eq.true&select=code,bezeichnung,zielgruppe,max_geraete,preis_cent,oeffentlich&order=bezeichnung.asc"
+    );
+    return json(tarife);
   }
   if (pfad === "/api/admin/erklaerungen" && request.method === "GET") {
     const erklaerungen = await db.select(
@@ -1441,6 +1448,16 @@ async function adminAktion(request, env, db, aktionsName, patch) {
 // Nachtraegliches Bearbeiten eines bestehenden Vertrags: Notiz und/oder
 // Bezahlt-bis-Datum aendern. Nur die tatsaechlich mitgeschickten Felder
 // werden angefasst, damit ein leer gelassenes Feld nichts loescht.
+// Liest ein optionales Geraete-Limit aus dem Admin-Formular.
+// undefined = nicht angegeben, null = Ueberschreibung entfernen, sonst 1..500.
+function leseGeraeteLimit(wert) {
+  if (wert === undefined) return { ok: true, wert: undefined };
+  if (wert === null || wert === "") return { ok: true, wert: null };
+  const zahl = Number(wert);
+  if (!Number.isInteger(zahl) || zahl < 1 || zahl > 500) return { ok: false };
+  return { ok: true, wert: zahl };
+}
+
 async function adminBearbeiten(request, env, db) {
   const body = await request.json().catch(() => ({}));
   if (!istUuid(body.subscription_id)) return json({ fehler: "fehlende_angaben" }, 400);
@@ -1452,6 +1469,9 @@ async function adminBearbeiten(request, env, db) {
     if (Number.isNaN(datum.getTime())) return json({ fehler: "ungueltiges_datum" }, 400);
     patch.bezahlt_bis = datum.toISOString();
   }
+  const limit = leseGeraeteLimit(body.max_geraete);
+  if (!limit.ok) return json({ fehler: "ungueltiges_geraetelimit" }, 400);
+  if (limit.wert !== undefined) patch.max_geraete_override = limit.wert;
   if (Object.keys(patch).length === 0) return json({ fehler: "nichts_zu_aendern" }, 400);
 
   await db.update("subscriptions", `id=eq.${filterWert(body.subscription_id)}`, {
@@ -1493,6 +1513,9 @@ async function adminManuellAnlegen(request, env, db) {
   ) {
     return json({ fehler: "fehlende_oder_ungueltige_angaben" }, 400);
   }
+
+  const geraeteLimit = leseGeraeteLimit(body.max_geraete);
+  if (!geraeteLimit.ok) return json({ fehler: "ungueltiges_geraetelimit" }, 400);
 
   const tarife = await db.select(
     "tariffs",
@@ -1547,12 +1570,13 @@ async function adminManuellAnlegen(request, env, db) {
       agb_version: istOrganisation ? GEMEINDE_AGB_VERSION : LEGAL_VERSION,
       widerruf_version: istOrganisation ? null : LEGAL_VERSION,
       datenschutz_version: LEGAL_VERSION,
+      max_geraete_override: geraeteLimit.wert ?? null,
       notiz: zahlungsreferenz ? `Manuell angelegt (Zahlung außerhalb PayPal): ${zahlungsreferenz}` : "Manuell angelegt (Zahlung außerhalb PayPal)",
     },
   ]);
 
   await db.insert("admin_actions", [
-    { admin_name: "Joerg", aktion: "manuell_angelegt", customer_id: customerId, details: `${tariffCode} / ${zahlungsreferenz || "ohne Referenz"}` },
+    { admin_name: "Joerg", aktion: "manuell_angelegt", customer_id: customerId, details: `${tariffCode} / ${zahlungsreferenz || "ohne Referenz"}${geraeteLimit.wert ? ` / max. ${geraeteLimit.wert} Geräte` : ""}` },
   ]);
 
   const confirmation = [

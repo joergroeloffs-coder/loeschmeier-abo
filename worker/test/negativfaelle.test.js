@@ -1068,3 +1068,70 @@ test("Admin: Erklaerungen-Liste liefert Kuendigungen/Widerrufe fuer die Uebersic
   assert.equal(liste.length, 1);
   assert.equal(liste[0].verarbeitungsstatus, "erstattet");
 });
+
+test("Zugriff: individuelles Geraetelimit am Vertrag erlaubt mehr Geraete als der Tarif", async () => {
+  const { umgebung } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
+      subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "aktiv", bezahlt_bis: "2099-01-01T00:00:00Z", max_geraete_override: 5, tariffs: { max_geraete: 2 } }],
+      devices: [
+        { id: "g1", customer_id: "kunde-1", geraet_kennung: "11111111-1111-4111-8111-111111111111" },
+        { id: "g2", customer_id: "kunde-1", geraet_kennung: "22222222-2222-4222-8222-222222222222" },
+      ],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const drittes = await worker.fetch(
+    anfrage("/api/zugriff?geraet=33333333-3333-4333-8333-333333333333", { token: "gueltig" }), ENV);
+  const antwort = await drittes.json();
+  assert.equal(antwort.erlaubt, true);
+  assert.equal(antwort.maxGeraete, 5);
+});
+
+test("Admin: manueller Zugang mit eigenem Geraetelimit; ungueltiges Limit wird abgelehnt", async () => {
+  const { umgebung, daten } = baueUmgebung({ tabellen: { tariffs: [TARIF] } });
+  const worker = await ladeWorker(umgebung);
+  const senden = (limit) => worker.fetch(new Request("https://worker.test/api/admin/manuell-anlegen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ email: "wehr@example.test", tariff_code: "foehr-jahr", max_geraete: limit }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+
+  const ungueltig = await senden(0);
+  assert.equal(ungueltig.status, 400);
+  assert.equal((daten.subscriptions || []).length, 0);
+
+  const gut = await senden(8);
+  assert.equal(gut.status, 200);
+  assert.equal(daten.subscriptions[0].max_geraete_override, 8);
+});
+
+test("Admin: Geraetelimit eines bestehenden Vertrags aendern und wieder entfernen", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id, status: "aktiv", notiz: "x" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  const senden = (body) => worker.fetch(new Request("https://worker.test/api/admin/bearbeiten", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: id, ...body }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+
+  assert.equal((await senden({ max_geraete: 6 })).status, 200);
+  assert.equal(daten.subscriptions[0].max_geraete_override, 6);
+  assert.equal((await senden({ max_geraete: "" })).status, 200);
+  assert.equal(daten.subscriptions[0].max_geraete_override, null);
+  assert.equal((await senden({ max_geraete: 501 })).status, 400);
+});
+
+test("Admin: Tarifliste fuers Dropdown nur mit Passwort", async () => {
+  const { umgebung } = baueUmgebung({ tabellen: { tariffs: [TARIF] } });
+  const worker = await ladeWorker(umgebung);
+  const ohne = await worker.fetch(new Request("https://worker.test/api/admin/tarife"), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(ohne.status, 401);
+  const mit = await worker.fetch(new Request("https://worker.test/api/admin/tarife", { headers: { "X-Admin-Passwort": "geheim" } }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(mit.status, 200);
+  const liste = await mit.json();
+  assert.equal(liste[0].code, "foehr-jahr");
+});
