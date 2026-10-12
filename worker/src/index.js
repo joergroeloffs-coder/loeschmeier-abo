@@ -478,8 +478,20 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     // unabhaengig von Mindestlaufzeit und Kuendigungsfrist.
     effective = now;
     if (requestedEnd && requestedEnd > effective && requestedEnd < paidUntil) effective = requestedEnd;
+  } else if (!istOrganisation) {
+    // Verbraucher (§ 309 Nr. 9 BGB): Nach der Mindestlaufzeit laeuft der
+    // Vertrag auf unbestimmte Zeit und ist mit einer Frist von hoechstens
+    // einem Monat kuendbar. Die Kuendigung wirkt frueher nicht als zum Ende
+    // der Mindestlaufzeit, sonst einen Monat nach Zugang.
+    const einMonat = new Date(now);
+    einMonat.setUTCMonth(einMonat.getUTCMonth() + 1);
+    effective = minimumEnd > einMonat ? minimumEnd : einMonat;
+    // Ein spaeterer Wunschtermin ist zulaessig, soweit er noch im bezahlten Zeitraum liegt.
+    if (requestedEnd && requestedEnd > effective) {
+      effective = requestedEnd < paidUntil ? requestedEnd : (paidUntil > effective ? paidUntil : effective);
+    }
   } else {
-    // Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
+    // Organisationen: Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
     // fruehestens zum Ende der Mindestlaufzeit. Liegt zwischen jetzt und
     // diesem Zeitpunkt weniger Vorlauf als die Kuendigungsfrist, verlaengert
     // sich der Vertrag noch um eine weitere Periode (naechster Termin).
@@ -501,11 +513,12 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     if (!cancelled) processingStatus = "paypal_pruefung_noetig";
   }
 
-  // Nur bei ausserordentlicher Kuendigung endet der Vertrag vor dem
-  // Laufzeitende; dafuer wird die bereits gezahlte, ungenutzte Restzeit
-  // anteilig erstattet. Eine ordentliche Kuendigung wirkt erst zum
-  // Laufzeitende, dafuer entfaellt eine anteilige Erstattung.
-  if (refundEligible && effective < paidUntil) {
+  // Endet der Vertrag vor dem Ende des bezahlten Zeitraums, wird die bezahlte,
+  // ungenutzte Restzeit anteilig erstattet: bei ausserordentlicher Kuendigung
+  // und bei Verbrauchern auch nach ordentlicher Kuendigung nach der
+  // Mindestlaufzeit. Weniger als ein Tag Differenz bleibt unberuecksichtigt.
+  const erstattungVorgesehen = refundEligible || !istOrganisation;
+  if (erstattungVorgesehen && paidUntil.getTime() - effective.getTime() > 24 * 60 * 60 * 1000) {
     const payments = await db.select(
       "payments",
       `subscription_id=eq.${subscription.id}&status=in.(erfolgreich,teilweise_erstattet)&select=id,paypal_capture_id,betrag_cent,waehrung,zeitpunkt,erstattet_cent&order=zeitpunkt.desc&limit=1`
@@ -545,12 +558,17 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     }
   }
 
-  await db.update("subscriptions", `id=eq.${subscription.id}`, {
+  const aenderung = {
     status: "gekuendigt_zum_ende",
     gekuendigt_am: now.toISOString(),
     kuendigungswirksam_am: effective.toISOString(),
     aktualisiert_am: now.toISOString(),
-  });
+  };
+  // Faellt das Vertragsende hinter den bezahlten Zeitraum (Kuendigung kurz vor
+  // dem Ende der Mindestlaufzeit), bleibt der Zugang bis zum Vertragsende
+  // ohne Mehrkosten bestehen, da das PayPal-Abo oben beendet wurde.
+  if (!istOrganisation && effective > paidUntil) aenderung.bezahlt_bis = effective.toISOString();
+  await db.update("subscriptions", `id=eq.${subscription.id}`, aenderung);
   return { effectiveAt: effective.toISOString(), processingStatus, refundedCents };
 }
 
@@ -1083,7 +1101,7 @@ async function aboAnlegen(request, env) {
     `Vertragsschluss: ${datumText(now)}`,
     `Leistungsbeginn: ${datumText(performanceStart)}`,
     `Mindestlaufzeit bis: ${datumText(contractEnd)}`,
-    `Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird. Die Vergütung von ${preisText} wird jeweils für zwölf Monate im Voraus berechnet. Für eine ordentliche Kündigung erfolgt keine anteilige Erstattung; das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.`,
+    `Danach läuft der Vertrag auf unbestimmte Zeit weiter und kann jederzeit mit einer Frist von einem Monat gekündigt werden, frühestens zum Ende der Mindestlaufzeit. Die Vergütung von ${preisText} wird jeweils für zwölf Monate im Voraus berechnet; endet der Vertrag vor dem Ende eines bezahlten Zeitraums, wird das Entgelt für die Zeit danach anteilig erstattet. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.`,
     `Rechtstexte-Version: ${LEGAL_VERSION}`,
     body.sofortiger_beginn
       ? "Sie haben ausdrücklich verlangt, dass die Leistung vor Ablauf der Widerrufsfrist beginnt."
@@ -1100,7 +1118,7 @@ async function aboAnlegen(request, env) {
     `Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie ${basisUrl(env)}/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.`,
     "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschbärt Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
     "",
-    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird; für eine ordentliche Kündigung erfolgt keine anteilige Erstattung. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
+    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag auf unbestimmte Zeit weiter und kann jederzeit mit einer Frist von einem Monat gekündigt werden, frühestens zum Ablauf der Mindestlaufzeit; endet der Vertrag vor dem Ende eines bezahlten Zwölfmonatszeitraums, wird das Entgelt für die Zeit danach anteilig erstattet. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt. Bei konkretem Missbrauchsverdacht darf der Anbieter den Zugang vorübergehend sichern oder sperren; der Kunde wird informiert und erhält Gelegenheit zur Klärung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
     `Zusätzliche lesbare Fassung: ${basisUrl(env)}/agb.html`,
     `Datenschutz: ${basisUrl(env)}/datenschutz.html`,
   ].join("\n");

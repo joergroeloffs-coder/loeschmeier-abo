@@ -1,4 +1,4 @@
-export const LEGAL_VERSION = "2026-09-21";
+export const LEGAL_VERSION = "2026-10-12";
 
 export function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();

@@ -704,10 +704,10 @@ test("Ordentliche Kuendigung mit mehr als 6 Wochen Vorlauf wirkt zum Laufzeitend
   assert.equal(daten.payments[0].status, "erfolgreich", "keine Erstattung bei ordentlicher Kuendigung");
 });
 
-test("Ordentliche Kuendigung weniger als 6 Wochen vor Laufzeitende verlaengert den Vertrag um ein Jahr", async () => {
-  const paidUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // in 10 Tagen, zu spaet fuer die 6-Wochen-Frist
-  const erwartet = new Date(paidUntil);
-  erwartet.setUTCFullYear(erwartet.getUTCFullYear() + 1);
+test("Ordentliche Kuendigung kurz vor Ende der Mindestlaufzeit wirkt einen Monat nach Zugang", async () => {
+  const paidUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // in 10 Tagen
+  const erwartet = new Date();
+  erwartet.setUTCMonth(erwartet.getUTCMonth() + 1);
   const { umgebung, daten } = baueUmgebung({
     tabellen: {
       customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
@@ -729,7 +729,40 @@ test("Ordentliche Kuendigung weniger als 6 Wochen vor Laufzeitende verlaengert d
       },
     }), ENV);
   assert.equal(antwort.status, 200);
-  assert.equal(daten.legal_declarations[0].wirksam_zum, erwartet.toISOString());
+  const wirksam = new Date(daten.legal_declarations[0].wirksam_zum);
+  assert.ok(Math.abs(wirksam - erwartet) < 60000, "Vertragsende liegt einen Monat nach der Kuendigung");
+  assert.equal(new Date(daten.subscriptions[0].bezahlt_bis).toISOString(), wirksam.toISOString(), "Zugang bleibt bis zum Vertragsende");
+});
+
+test("Ordentliche Kuendigung nach der Mindestlaufzeit: Frist ein Monat, Rest des bezahlten Jahres wird anteilig erstattet", async () => {
+  const zahlungAm = new Date(Date.now() - 65 * 24 * 60 * 60 * 1000);
+  const mindestEnde = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const paidUntil = new Date(zahlungAm.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: paidUntil.toISOString(),
+        mindestlaufzeit_bis: mindestEnde.toISOString(),
+      }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "C-1", betrag_cent: 1000, waehrung: "EUR", zeitpunkt: zahlungAm.toISOString(), erstattet_cent: 0 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ordentlich",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "anteilig_erstattet");
+  assert.ok(daten.payments[0].erstattet_cent > 500 && daten.payments[0].erstattet_cent < 1000, "mehr als die Haelfte des Jahres ist unverbraucht");
+  assert.ok(new Date(daten.legal_declarations[0].wirksam_zum) < paidUntil);
 });
 
 test("Ausserordentliche Kuendigung wirkt sofort und erstattet die ungenutzte Restzeit anteilig", async () => {
