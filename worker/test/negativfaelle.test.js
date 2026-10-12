@@ -1116,3 +1116,45 @@ test("Webhook: Teilerstattung beendet den Vertrag nicht, Vollerstattung schon", 
   assert.equal(daten.payments[0].status, "erstattet");
   assert.equal(daten.subscriptions[0].status, "erstattet");
 });
+
+test("Admin: Loeschen mit laufendem PayPal-Abo wird abgelehnt", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id, status: "aktiv", paypal_subscription_id: "I-ABC" }] },
+    paypal: { abo: { status: "ACTIVE" } },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: id }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 409);
+  assert.equal((await antwort.json()).fehler, "paypal_abo_noch_aktiv");
+  assert.equal(daten.subscriptions.length, 1);
+});
+
+test("Admin: Loeschen mit vorhandener Rechnung braucht ausdrueckliche Bestaetigung", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      subscriptions: [{ id, status: "widerrufen" }],
+      invoices: [{ id: "r1", subscription_id: id, rechnungsnummer: "2026-0001" }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const senden = (zusatz) => worker.fetch(new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: id, ...zusatz }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+
+  const ohne = await senden({});
+  assert.equal(ohne.status, 409);
+  assert.equal((await ohne.json()).fehler, "rechnungen_vorhanden");
+  assert.equal(daten.subscriptions.length, 1);
+
+  const mit = await senden({ rechnungen_loeschen: true });
+  assert.equal(mit.status, 200);
+  assert.equal(daten.subscriptions.length, 0);
+});

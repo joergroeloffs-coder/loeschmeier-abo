@@ -1696,10 +1696,32 @@ async function adminLoeschen(request, env, db) {
 
   const treffer = await db.select(
     "subscriptions",
-    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,customer_id,customer_profiles(email)`
+    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,customer_id,paypal_subscription_id,customer_profiles(email)`
   );
   if (treffer.length === 0) return json({ fehler: "unbekannter_vertrag" }, 404);
   const subscription = treffer[0];
+
+  // Ein noch laufendes PayPal-Abo wuerde weiter abbuchen, obwohl der Vertrag
+  // hier verschwindet. Deshalb muss es vorher beendet sein.
+  if (subscription.paypal_subscription_id) {
+    let paypalStatus = "";
+    try {
+      const details = await holeAboDetails(env, subscription.paypal_subscription_id);
+      paypalStatus = String(details.status || "").toUpperCase();
+    } catch {
+      return json({ fehler: "paypal_status_unbekannt" }, 502);
+    }
+    if (!["CANCELLED", "EXPIRED"].includes(paypalStatus)) {
+      return json({ fehler: "paypal_abo_noch_aktiv" }, 409);
+    }
+  }
+
+  // Rechnungen sind steuerlich aufzubewahren (8 Jahre). Beim Loeschen eines
+  // Vertrags verschwinden sie mit; deshalb nur nach ausdruecklicher Bestaetigung.
+  const rechnungen = await db.select("invoices", `subscription_id=eq.${filterWert(subscription.id)}&select=id`);
+  if (rechnungen.length > 0 && body.rechnungen_loeschen !== true) {
+    return json({ fehler: "rechnungen_vorhanden", anzahl: rechnungen.length }, 409);
+  }
 
   await db.insert("admin_actions", [
     {
