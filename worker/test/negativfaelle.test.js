@@ -1335,3 +1335,19 @@ test("Gnadenfrist: Admin-Schluessel nur mit Passwort, abgewiesene Konten bekomme
   assert.equal(daten.erlaubt, false);
   assert.equal(daten.gnadenToken, undefined);
 });
+
+test("Zugriff: manueller Zugang mit Leistungsbeginn in der Vergangenheit ist freigegeben, mit Beginn in der Zukunft nicht", async () => {
+  const bauen = (beginn) => baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
+      subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "wartet_auf_leistungsbeginn", leistungsbeginn_am: beginn, bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 2 } }],
+    },
+  });
+  const vorbei = await ladeWorker(bauen(new Date(Date.now() - 3600e3).toISOString()).umgebung);
+  const ergebnisVorbei = await (await vorbei.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), ENV)).json();
+  assert.equal(ergebnisVorbei.erlaubt, true);
+
+  const spaeter = await ladeWorker(bauen(new Date(Date.now() + 5 * 86400e3).toISOString()).umgebung);
+  const ergebnisSpaeter = await (await spaeter.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), ENV)).json();
+  assert.equal(ergebnisSpaeter.erlaubt, false);
+});

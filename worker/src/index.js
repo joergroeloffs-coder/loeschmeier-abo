@@ -874,13 +874,21 @@ async function entscheideZugriff(request, env) {
 
   const abos = await db.select(
     "subscriptions",
-    `customer_id=eq.${filterWert(customerId)}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am,max_geraete_override,tariffs(max_geraete)&order=erstellt_am.desc&limit=1`
+    `customer_id=eq.${filterWert(customerId)}&select=id,status,manuell_gesperrt,bezahlt_bis,kuendigungswirksam_am,leistungsbeginn_am,max_geraete_override,tariffs(max_geraete)&order=erstellt_am.desc&limit=1`
   );
   if (abos.length === 0) return { erlaubt: false, grund: "kein_abo" };
   const abo = abos[0];
 
   if (abo.manuell_gesperrt) return { erlaubt: false, grund: "manuell_gesperrt" };
-  if (!ERLAUBTE_STATUS.has(abo.status)) {
+  // Ein Vertrag mit spaeterem Leistungsbeginn gilt ab diesem Zeitpunkt als aktiv,
+  // ohne auf den naechsten Abgleichlauf zu warten (manuelle Zugaenge haben kein PayPal-Abo).
+  const status =
+    abo.status === "wartet_auf_leistungsbeginn" &&
+    abo.leistungsbeginn_am &&
+    new Date(abo.leistungsbeginn_am) <= new Date()
+      ? "aktiv"
+      : abo.status;
+  if (!ERLAUBTE_STATUS.has(status)) {
     return { erlaubt: false, grund: "abo_status_" + abo.status };
   }
   // Ohne bekanntes Vertragsende darf ein gekuendigter Vertrag keinen
@@ -1385,7 +1393,20 @@ async function taeglicherAbgleich(env) {
   );
 
   for (const abo of abos) {
-    if (!abo.paypal_subscription_id) continue;
+    if (!abo.paypal_subscription_id) {
+      // Manuell angelegter Zugang mit spaeterem Leistungsbeginn: ab Beginn aktiv setzen.
+      if (
+        abo.status === "wartet_auf_leistungsbeginn" &&
+        abo.leistungsbeginn_am &&
+        new Date(abo.leistungsbeginn_am) <= new Date()
+      ) {
+        await db.update("subscriptions", `id=eq.${filterWert(abo.id)}`, {
+          status: "aktiv",
+          aktualisiert_am: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
     try {
       const details = await holeAboDetails(env, abo.paypal_subscription_id);
       const paypalStatus = (details.status || "").toUpperCase();
