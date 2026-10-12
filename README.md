@@ -1,7 +1,7 @@
 # Löschbärt Föhr – Verkaufsplattform
 
 Verkaufs-, Vertrags- und Zugangsverwaltung für den privaten Föhr-Jahreszugang.
-Der Zugang kostet 12 Euro pro Jahr und ist auf zwei Geräte begrenzt. Nach zwölf
+Der Zugang kostet 10 Euro pro Jahr und ist auf zwei Geräte begrenzt. Nach zwölf
 Monaten Mindestlaufzeit läuft der Vertrag unbefristet weiter; ab dann kann
 jederzeit gekündigt werden und vorausbezahlte Restzeit wird anteilig erstattet.
 Eine deaktivierte Tarifvorlage hält den späteren Ausbau für Gemeinde- und
@@ -20,8 +20,8 @@ Die Leck-Version ist nicht Bestandteil dieses Projekts.
   E-Mail-Warteschlange und Admin-API
 - `db/schema.sql`: bisheriges Basisschema
 - `db/migration_sales_platform.sql`: Erweiterung für den Föhr-Verkauf
-- `setup/paypal_plan_erstellen.py`: erzeugt einen PayPal-Sandboxplan mit
-  genau einem Jahreszyklus zu 12 Euro
+- `setup/paypal_plan_erstellen.py`: erzeugt einen PayPal-Plan mit genau einem
+  Jahreszyklus zu 10 Euro (Sandbox ohne Zusatz, mit `live` echte Zugangsdaten)
 
 ## Schutz vor versehentlichem Verkauf
 
@@ -34,7 +34,8 @@ gesetzt werden.
 ## Einmalige Einrichtung
 
 1. `db/migration_sales_platform.sql` im Supabase SQL-Editor ausführen.
-2. Mit `setup/paypal_plan_erstellen.py` einen neuen Sandboxplan erzeugen.
+2. Mit `setup/paypal_plan_erstellen.py` (für den Echtbetrieb: `... live`) einen
+   neuen Plan erzeugen.
 3. Dessen Plan-ID beim Tarif `foehr-jahr` in `tariffs.paypal_plan_id` eintragen.
 4. Worker deployen und Secrets setzen:
    - `SUPABASE_SERVICE_ROLE_KEY`

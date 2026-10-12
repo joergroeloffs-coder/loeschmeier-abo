@@ -144,7 +144,7 @@ function baueUmgebung({ tabellen = {}, paypal = {}, emailFehler = false } = {}) 
       globalThis: { Response, Headers, Request, URL, JSON, Date, Math, Promise, Number, String, Boolean, Object, Array, Set, parseInt, parseFloat, isNaN, encodeURIComponent, decodeURIComponent },
       fetch: fetchErsatz,
       console: { error() {}, warn() {}, log() {} },
-      crypto: { randomUUID: () => "12345678-1234-4123-8123-123456789012" },
+      crypto: { randomUUID: () => "12345678-1234-4123-8123-123456789012", subtle: globalThis.crypto.subtle },
     },
   };
 }
@@ -704,10 +704,10 @@ test("Ordentliche Kuendigung mit mehr als 6 Wochen Vorlauf wirkt zum Laufzeitend
   assert.equal(daten.payments[0].status, "erfolgreich", "keine Erstattung bei ordentlicher Kuendigung");
 });
 
-test("Ordentliche Kuendigung weniger als 6 Wochen vor Laufzeitende verlaengert den Vertrag um ein Jahr", async () => {
-  const paidUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // in 10 Tagen, zu spaet fuer die 6-Wochen-Frist
-  const erwartet = new Date(paidUntil);
-  erwartet.setUTCFullYear(erwartet.getUTCFullYear() + 1);
+test("Ordentliche Kuendigung kurz vor Ende der Mindestlaufzeit wirkt einen Monat nach Zugang", async () => {
+  const paidUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // in 10 Tagen
+  const erwartet = new Date();
+  erwartet.setUTCMonth(erwartet.getUTCMonth() + 1);
   const { umgebung, daten } = baueUmgebung({
     tabellen: {
       customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
@@ -729,7 +729,40 @@ test("Ordentliche Kuendigung weniger als 6 Wochen vor Laufzeitende verlaengert d
       },
     }), ENV);
   assert.equal(antwort.status, 200);
-  assert.equal(daten.legal_declarations[0].wirksam_zum, erwartet.toISOString());
+  const wirksam = new Date(daten.legal_declarations[0].wirksam_zum);
+  assert.ok(Math.abs(wirksam - erwartet) < 60000, "Vertragsende liegt einen Monat nach der Kuendigung");
+  assert.equal(new Date(daten.subscriptions[0].bezahlt_bis).toISOString(), wirksam.toISOString(), "Zugang bleibt bis zum Vertragsende");
+});
+
+test("Ordentliche Kuendigung nach der Mindestlaufzeit: Frist ein Monat, Rest des bezahlten Jahres wird anteilig erstattet", async () => {
+  const zahlungAm = new Date(Date.now() - 65 * 24 * 60 * 60 * 1000);
+  const mindestEnde = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const paidUntil = new Date(zahlungAm.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1", email: "kunde@example.test" }],
+      subscriptions: [{
+        id: "abo-1", customer_id: "kunde-1", status: "aktiv", vertragsnummer: "LB-2026-ABC",
+        paypal_subscription_id: "I-ABC", bezahlt_bis: paidUntil.toISOString(),
+        mindestlaufzeit_bis: mindestEnde.toISOString(),
+      }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", status: "erfolgreich", paypal_capture_id: "C-1", betrag_cent: 1000, waehrung: "EUR", zeitpunkt: zahlungAm.toISOString(), erstattet_cent: 0 }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(
+    anfrage("/api/kuendigung-erklaeren", {
+      methode: "POST",
+      koerper: {
+        name: "Erika Musterfrau", email: "kunde@example.test",
+        vertragsreferenz: "LB-2026-ABC", vertragsbezeichnung: "Löschbärt Föhr – Jahreszugang",
+        erklaerungsart: "ordentlich",
+      },
+    }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.legal_declarations[0].verarbeitungsstatus, "anteilig_erstattet");
+  assert.ok(daten.payments[0].erstattet_cent > 500 && daten.payments[0].erstattet_cent < 1000, "mehr als die Haelfte des Jahres ist unverbraucht");
+  assert.ok(new Date(daten.legal_declarations[0].wirksam_zum) < paidUntil);
 });
 
 test("Ausserordentliche Kuendigung wirkt sofort und erstattet die ungenutzte Restzeit anteilig", async () => {
@@ -1134,4 +1167,171 @@ test("Admin: Tarifliste fuers Dropdown nur mit Passwort", async () => {
   assert.equal(mit.status, 200);
   const liste = await mit.json();
   assert.equal(liste[0].code, "foehr-jahr");
+});
+
+test("Webhook: eigene PayPal-Kuendigung ueberschreibt einen Widerruf nicht", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "widerrufen", gekuendigt_am: "2026-10-11T18:00:00Z" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id: "EV-C1", event_type: "BILLING.SUBSCRIPTION.CANCELLED", resource: { id: "I-ABC" } },
+  }), ENV);
+  assert.equal(antwort.status, 200);
+  assert.equal(daten.subscriptions[0].status, "widerrufen");
+});
+
+test("Webhook: PayPal-Kuendigung eines aktiven Vertrags setzt gekuendigt_zum_ende", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "aktiv" }] },
+  });
+  const worker = await ladeWorker(umgebung);
+  await worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id: "EV-C2", event_type: "BILLING.SUBSCRIPTION.CANCELLED", resource: { id: "I-ABC" } },
+  }), ENV);
+  assert.equal(daten.subscriptions[0].status, "gekuendigt_zum_ende");
+});
+
+test("Webhook: Teilerstattung beendet den Vertrag nicht, Vollerstattung schon", async () => {
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      subscriptions: [{ id: "abo-1", paypal_subscription_id: "I-ABC", status: "gekuendigt_zum_ende" }],
+      payments: [{ id: "zahlung-1", subscription_id: "abo-1", paypal_capture_id: "SALE-1", betrag_cent: 1000, status: "erfolgreich" }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const senden = (id, betrag) => worker.fetch(anfrage("/webhook/paypal", {
+    methode: "POST",
+    koerper: { id, event_type: "PAYMENT.SALE.REFUNDED", resource: { id: "R-" + id, sale_id: "SALE-1", amount: { total: betrag, currency: "EUR" } } },
+  }), ENV);
+
+  assert.equal((await senden("EV-R1", "4.00")).status, 200);
+  assert.equal(daten.payments[0].status, "teilweise_erstattet");
+  assert.equal(daten.payments[0].erstattet_cent, 400);
+  assert.equal(daten.subscriptions[0].status, "gekuendigt_zum_ende");
+
+  assert.equal((await senden("EV-R2", "10.00")).status, 200);
+  assert.equal(daten.payments[0].status, "erstattet");
+  assert.equal(daten.subscriptions[0].status, "erstattet");
+});
+
+test("Admin: Loeschen mit laufendem PayPal-Abo wird abgelehnt", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: { subscriptions: [{ id, status: "aktiv", paypal_subscription_id: "I-ABC" }] },
+    paypal: { abo: { status: "ACTIVE" } },
+  });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: id }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+  assert.equal(antwort.status, 409);
+  assert.equal((await antwort.json()).fehler, "paypal_abo_noch_aktiv");
+  assert.equal(daten.subscriptions.length, 1);
+});
+
+test("Admin: Loeschen mit vorhandener Rechnung braucht ausdrueckliche Bestaetigung", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { umgebung, daten } = baueUmgebung({
+    tabellen: {
+      subscriptions: [{ id, status: "widerrufen" }],
+      invoices: [{ id: "r1", subscription_id: id, rechnungsnummer: "2026-0001" }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const senden = (zusatz) => worker.fetch(new Request("https://worker.test/api/admin/loeschen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: JSON.stringify({ subscription_id: id, ...zusatz }),
+  }), { ...ENV, ADMIN_PASSWORT: "geheim" });
+
+  const ohne = await senden({});
+  assert.equal(ohne.status, 409);
+  assert.equal((await ohne.json()).fehler, "rechnungen_vorhanden");
+  assert.equal(daten.subscriptions.length, 1);
+
+  const mit = await senden({ rechnungen_loeschen: true });
+  assert.equal(mit.status, 200);
+  assert.equal(daten.subscriptions.length, 0);
+});
+
+function baueKv() {
+  const speicher = new Map();
+  return { get: async (k) => speicher.get(k) ?? null, put: async (k, v) => { speicher.set(k, v); }, speicher };
+}
+
+const AKTIVES_KONTO = {
+  customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
+  subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "aktiv", bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 2 } }],
+};
+const GERAET = "33333333-3333-4333-8333-333333333333";
+
+test("Gnadenfrist: ohne Schluessel im Worker kein Token", async () => {
+  const { umgebung } = baueUmgebung({ tabellen: AKTIVES_KONTO });
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), { ...ENV, RATE_KV: baueKv() });
+  const daten = await antwort.json();
+  assert.equal(daten.erlaubt, true);
+  assert.equal(daten.gnadenToken, undefined);
+  const schluessel = await worker.fetch(anfrage("/api/zugriff-schluessel"), { ...ENV, RATE_KV: baueKv() });
+  assert.equal(schluessel.status, 404);
+});
+
+test("Gnadenfrist: Admin erzeugt Schluessel, Token ist signiert, an das Geraet gebunden und 72 Stunden gueltig", async () => {
+  const { umgebung } = baueUmgebung({ tabellen: AKTIVES_KONTO });
+  const worker = await ladeWorker(umgebung);
+  const env = { ...ENV, ADMIN_PASSWORT: "geheim", RATE_KV: baueKv() };
+
+  const erzeugt = await worker.fetch(new Request("https://worker.test/api/admin/gnadenschluessel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Passwort": "geheim" },
+    body: "{}",
+  }), env);
+  assert.equal(erzeugt.status, 200);
+  const oeffentlich = await erzeugt.json();
+  assert.equal(oeffentlich.kty, "EC");
+  assert.equal(oeffentlich.d, undefined, "privater Anteil darf nie ausgeliefert werden");
+
+  const abgerufen = await worker.fetch(anfrage("/api/zugriff-schluessel"), env);
+  assert.deepEqual(await abgerufen.json(), oeffentlich);
+
+  const antwort = await worker.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), env);
+  const daten = await antwort.json();
+  assert.equal(daten.erlaubt, true);
+  assert.ok(daten.gnadenToken);
+
+  const [nutzlast, signatur] = daten.gnadenToken.split(".");
+  const bytes = (t) => Uint8Array.from(Buffer.from(t.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
+  const key = await crypto.subtle.importKey("jwk", oeffentlich, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  assert.equal(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, bytes(signatur), new TextEncoder().encode(nutzlast)), true);
+  assert.equal(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, bytes(signatur), new TextEncoder().encode(nutzlast + "x")), false, "veraenderte Nutzlast wird erkannt");
+  const inhalt = JSON.parse(Buffer.from(bytes(nutzlast)).toString("utf8"));
+  assert.equal(inhalt.g, GERAET);
+  assert.ok(inhalt.bis - Date.now() > 71 * 3600 * 1000 && inhalt.bis - Date.now() <= 72 * 3600 * 1000);
+});
+
+test("Gnadenfrist: Admin-Schluessel nur mit Passwort, abgewiesene Konten bekommen kein Token", async () => {
+  const { umgebung } = baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
+      subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "aktiv", manuell_gesperrt: true, bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 2 } }],
+    },
+  });
+  const worker = await ladeWorker(umgebung);
+  const kv = baueKv();
+  const ohne = await worker.fetch(new Request("https://worker.test/api/admin/gnadenschluessel", { method: "POST", body: "{}" }), { ...ENV, ADMIN_PASSWORT: "geheim", RATE_KV: kv });
+  assert.equal(ohne.status, 401);
+  assert.equal(kv.speicher.size > 0 && kv.speicher.has("gnaden_schluessel_v1"), false);
+
+  await worker.fetch(new Request("https://worker.test/api/admin/gnadenschluessel", {
+    method: "POST", headers: { "X-Admin-Passwort": "geheim" }, body: "{}",
+  }), { ...ENV, ADMIN_PASSWORT: "geheim", RATE_KV: kv });
+  const gesperrt = await worker.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), { ...ENV, RATE_KV: kv });
+  const daten = await gesperrt.json();
+  assert.equal(daten.erlaubt, false);
+  assert.equal(daten.gnadenToken, undefined);
 });

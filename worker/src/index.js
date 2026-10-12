@@ -91,6 +91,9 @@ export default {
       if (url.pathname === "/api/zugriff" && request.method === "GET") {
         return await pruefeZugriff(request, env);
       }
+      if (url.pathname === "/api/zugriff-schluessel" && request.method === "GET") {
+        return await gnadenSchluesselOeffentlich(env);
+      }
       if (url.pathname === "/api/stellen" && request.method === "GET") {
         return await geschuetzteStellen(request, env);
       }
@@ -478,8 +481,20 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     // unabhaengig von Mindestlaufzeit und Kuendigungsfrist.
     effective = now;
     if (requestedEnd && requestedEnd > effective && requestedEnd < paidUntil) effective = requestedEnd;
+  } else if (!istOrganisation) {
+    // Verbraucher (§ 309 Nr. 9 BGB): Nach der Mindestlaufzeit laeuft der
+    // Vertrag auf unbestimmte Zeit und ist mit einer Frist von hoechstens
+    // einem Monat kuendbar. Die Kuendigung wirkt frueher nicht als zum Ende
+    // der Mindestlaufzeit, sonst einen Monat nach Zugang.
+    const einMonat = new Date(now);
+    einMonat.setUTCMonth(einMonat.getUTCMonth() + 1);
+    effective = minimumEnd > einMonat ? minimumEnd : einMonat;
+    // Ein spaeterer Wunschtermin ist zulaessig, soweit er noch im bezahlten Zeitraum liegt.
+    if (requestedEnd && requestedEnd > effective) {
+      effective = requestedEnd < paidUntil ? requestedEnd : (paidUntil > effective ? paidUntil : effective);
+    }
   } else {
-    // Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
+    // Organisationen: Ordentliche Kuendigung wirkt erst zum Ende der laufenden Laufzeit,
     // fruehestens zum Ende der Mindestlaufzeit. Liegt zwischen jetzt und
     // diesem Zeitpunkt weniger Vorlauf als die Kuendigungsfrist, verlaengert
     // sich der Vertrag noch um eine weitere Periode (naechster Termin).
@@ -501,11 +516,12 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     if (!cancelled) processingStatus = "paypal_pruefung_noetig";
   }
 
-  // Nur bei ausserordentlicher Kuendigung endet der Vertrag vor dem
-  // Laufzeitende; dafuer wird die bereits gezahlte, ungenutzte Restzeit
-  // anteilig erstattet. Eine ordentliche Kuendigung wirkt erst zum
-  // Laufzeitende, dafuer entfaellt eine anteilige Erstattung.
-  if (refundEligible && effective < paidUntil) {
+  // Endet der Vertrag vor dem Ende des bezahlten Zeitraums, wird die bezahlte,
+  // ungenutzte Restzeit anteilig erstattet: bei ausserordentlicher Kuendigung
+  // und bei Verbrauchern auch nach ordentlicher Kuendigung nach der
+  // Mindestlaufzeit. Weniger als ein Tag Differenz bleibt unberuecksichtigt.
+  const erstattungVorgesehen = refundEligible || !istOrganisation;
+  if (erstattungVorgesehen && paidUntil.getTime() - effective.getTime() > 24 * 60 * 60 * 1000) {
     const payments = await db.select(
       "payments",
       `subscription_id=eq.${subscription.id}&status=in.(erfolgreich,teilweise_erstattet)&select=id,paypal_capture_id,betrag_cent,waehrung,zeitpunkt,erstattet_cent&order=zeitpunkt.desc&limit=1`
@@ -545,12 +561,17 @@ async function kuendigungVerarbeiten(db, env, subscription, requestedEnd = null,
     }
   }
 
-  await db.update("subscriptions", `id=eq.${subscription.id}`, {
+  const aenderung = {
     status: "gekuendigt_zum_ende",
     gekuendigt_am: now.toISOString(),
     kuendigungswirksam_am: effective.toISOString(),
     aktualisiert_am: now.toISOString(),
-  });
+  };
+  // Faellt das Vertragsende hinter den bezahlten Zeitraum (Kuendigung kurz vor
+  // dem Ende der Mindestlaufzeit), bleibt der Zugang bis zum Vertragsende
+  // ohne Mehrkosten bestehen, da das PayPal-Abo oben beendet wurde.
+  if (!istOrganisation && effective > paidUntil) aenderung.bezahlt_bis = effective.toISOString();
+  await db.update("subscriptions", `id=eq.${subscription.id}`, aenderung);
   return { effectiveAt: effective.toISOString(), processingStatus, refundedCents };
 }
 
@@ -715,7 +736,12 @@ async function verarbeiteEreignis(db, env, ereignis) {
     case "BILLING.SUBSCRIPTION.SUSPENDED":
     case "BILLING.SUBSCRIPTION.EXPIRED": {
       const neuerStatus = typ.endsWith("EXPIRED") ? "abgelaufen" : "gesperrt";
-      await db.update("subscriptions", `paypal_subscription_id=eq.${filterWert(resource.id)}`, {
+      const aktuell = await db.select(
+        "subscriptions",
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,status`
+      );
+      if (aktuell.length === 0 || ENDZUSTAENDE.has(aktuell[0].status)) break;
+      await db.update("subscriptions", `id=eq.${filterWert(aktuell[0].id)}`, {
         status: neuerStatus,
         aktualisiert_am: new Date().toISOString(),
       });
@@ -728,12 +754,16 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // aber der Status zeigt "gekuendigt".
       const abos = await db.select(
         "subscriptions",
-        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,bezahlt_bis`
+        `paypal_subscription_id=eq.${filterWert(resource.id)}&select=id,bezahlt_bis,status,gekuendigt_am`
       );
       if (abos.length === 0) break;
+      // Unsere eigene Kuendigung bei PayPal loest diesen Webhook ebenfalls aus.
+      // Ein bereits beendeter Vertrag (Widerruf, Erstattung, Ablauf) darf dadurch
+      // nicht wieder auf "gekuendigt, laeuft bis Vertragsende" zurueckfallen.
+      if (ENDZUSTAENDE.has(abos[0].status)) break;
       await db.update("subscriptions", `id=eq.${abos[0].id}`, {
         status: "gekuendigt_zum_ende",
-        gekuendigt_am: new Date().toISOString(),
+        gekuendigt_am: abos[0].gekuendigt_am || new Date().toISOString(),
         aktualisiert_am: new Date().toISOString(),
       });
       break;
@@ -745,13 +775,25 @@ async function verarbeiteEreignis(db, env, ereignis) {
       // payments-Tabelle (subscription_id war dort schon beim urspruenglichen
       // Zahlungseingang gespeichert).
       const urspruenglicheSaleId = resource.sale_id || resource.parent_payment;
-      const aktualisiertePayments = await db.update(
+      const vorhandene = await db.select(
         "payments",
-        `paypal_capture_id=eq.${filterWert(urspruenglicheSaleId)}`,
-        { status: "erstattet", erstattet_am: new Date().toISOString() }
+        `paypal_capture_id=eq.${filterWert(urspruenglicheSaleId)}&select=id,subscription_id,betrag_cent,erstattet_cent`
       );
-      if (aktualisiertePayments.length > 0) {
-        await db.update("subscriptions", `id=eq.${aktualisiertePayments[0].subscription_id}`, {
+      if (vorhandene.length === 0) break;
+      const zahlung = vorhandene[0];
+      // PayPal meldet den Betrag dieser einen Erstattung. Eine Teilerstattung
+      // (z.B. anteilig bei ausserordentlicher Kuendigung) beendet den Vertrag nicht.
+      const erstattungCent = Math.round(parseFloat(resource.amount?.total || "0") * 100);
+      const bereits = zahlung.erstattet_cent || 0;
+      const gesamt = Math.min(zahlung.betrag_cent, Math.max(bereits, erstattungCent));
+      const voll = gesamt >= zahlung.betrag_cent;
+      await db.update("payments", `id=eq.${filterWert(zahlung.id)}`, {
+        status: voll ? "erstattet" : "teilweise_erstattet",
+        erstattet_cent: gesamt,
+        erstattet_am: new Date().toISOString(),
+      });
+      if (voll) {
+        await db.update("subscriptions", `id=eq.${filterWert(zahlung.subscription_id)}`, {
           status: "erstattet",
           aktualisiert_am: new Date().toISOString(),
         });
@@ -769,6 +811,8 @@ async function verarbeiteEreignis(db, env, ereignis) {
 // ---------- Zugriffspruefung (von der App bei jeder geschuetzten Aktion aufgerufen) ----------
 
 const ERLAUBTE_STATUS = new Set(["aktiv", "kulanzzeit", "gekuendigt_zum_ende"]);
+// Vertraege in diesen Zustaenden werden von PayPal-Webhooks nicht mehr veraendert.
+const ENDZUSTAENDE = new Set(["erstattet", "widerrufen", "abgelaufen"]);
 const STANDARD_MAX_GERAETE = 2;
 
 // Zentrale Entscheidung "darf dieses Geraet dieses Konto nutzen?". Sie wird
@@ -891,7 +935,83 @@ function istBetreiber(env, email) {
 async function pruefeZugriff(request, env) {
   const ergebnis = await entscheideZugriff(request, env);
   const { status = 200, ...rest } = ergebnis;
+  // Nach erfolgreicher Pruefung gibt der Server eine signierte Gnadenfrist mit,
+  // damit die App bei kurzzeitig fehlender Verbindung (Funkloch) weiterlaeuft.
+  // Betreiberkonten und Betreiberseiten brauchen die Verbindung immer.
+  if (ergebnis.erlaubt && !ergebnis.betreiber) {
+    const geraet = new URL(request.url).searchParams.get("geraet");
+    try {
+      const gnade = await signiereGnadenToken(env, geraet);
+      if (gnade) {
+        rest.gnadenToken = gnade.token;
+        rest.gnadenBis = gnade.bis;
+      }
+    } catch (e) {
+      console.error("Gnadenfrist konnte nicht signiert werden", String(e));
+    }
+  }
   return json(rest, ergebnis.erlaubt ? 200 : status);
+}
+
+// ---------- Gnadenfrist (signierte Offline-Freigabe) ----------
+// ECDSA P-256. Der private Schluessel liegt nur im Worker (KV), der oeffentliche
+// steht in der App-Konfiguration. Die App prueft die Signatur selbst; ohne
+// Schluessel im Worker wird keine Gnadenfrist ausgegeben.
+
+const GNADEN_KV_SCHLUESSEL = "gnaden_schluessel_v1";
+const ECDSA_PARAMETER = { name: "ECDSA", namedCurve: "P-256" };
+
+function zuBase64Url(bytes) {
+  let text = "";
+  for (const b of bytes) text += String.fromCharCode(b);
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function ladeGnadenSchluessel(env) {
+  if (!env.RATE_KV) return null;
+  const roh = await env.RATE_KV.get(GNADEN_KV_SCHLUESSEL);
+  if (!roh) return null;
+  try {
+    return JSON.parse(roh);
+  } catch {
+    return null;
+  }
+}
+
+async function erzeugeGnadenSchluessel(env, neu = false) {
+  if (!env.RATE_KV) throw new Error("kein_kv");
+  if (!neu) {
+    const vorhanden = await ladeGnadenSchluessel(env);
+    if (vorhanden) return vorhanden.oeffentlich;
+  }
+  const paar = await crypto.subtle.generateKey(ECDSA_PARAMETER, true, ["sign", "verify"]);
+  const privat = await crypto.subtle.exportKey("jwk", paar.privateKey);
+  const voll = await crypto.subtle.exportKey("jwk", paar.publicKey);
+  const oeffentlich = { kty: voll.kty, crv: voll.crv, x: voll.x, y: voll.y };
+  await env.RATE_KV.put(GNADEN_KV_SCHLUESSEL, JSON.stringify({ privat, oeffentlich }));
+  return oeffentlich;
+}
+
+async function signiereGnadenToken(env, geraet) {
+  const schluessel = await ladeGnadenSchluessel(env);
+  if (!schluessel || !istUuid(geraet)) return null;
+  const stunden = Math.min(168, Math.max(1, parseInt(env.GNADENFRIST_STUNDEN || "72", 10) || 72));
+  const jetzt = Date.now();
+  const bis = jetzt + stunden * 3600 * 1000;
+  const nutzlast = zuBase64Url(new TextEncoder().encode(JSON.stringify({ v: 1, g: geraet, ab: jetzt, bis })));
+  const key = await crypto.subtle.importKey("jwk", schluessel.privat, ECDSA_PARAMETER, false, ["sign"]);
+  const signatur = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(nutzlast)
+  );
+  return { token: nutzlast + "." + zuBase64Url(new Uint8Array(signatur)), bis };
+}
+
+async function gnadenSchluesselOeffentlich(env) {
+  const schluessel = await ladeGnadenSchluessel(env);
+  if (!schluessel) return json({ fehler: "kein_schluessel" }, 404);
+  return json(schluessel.oeffentlich);
 }
 
 // Liefert die Stellendaten nur an berechtigte Konten aus. Damit haengt der
@@ -1060,7 +1180,7 @@ async function aboAnlegen(request, env) {
     `Vertragsschluss: ${datumText(now)}`,
     `Leistungsbeginn: ${datumText(performanceStart)}`,
     `Mindestlaufzeit bis: ${datumText(contractEnd)}`,
-    `Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird. Die Vergütung von ${preisText} wird jeweils für zwölf Monate im Voraus berechnet. Für eine ordentliche Kündigung erfolgt keine anteilige Erstattung; das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.`,
+    `Danach läuft der Vertrag auf unbestimmte Zeit weiter und kann jederzeit mit einer Frist von einem Monat gekündigt werden, frühestens zum Ende der Mindestlaufzeit. Die Vergütung von ${preisText} wird jeweils für zwölf Monate im Voraus berechnet; endet der Vertrag vor dem Ende eines bezahlten Zeitraums, wird das Entgelt für die Zeit danach anteilig erstattet. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.`,
     `Rechtstexte-Version: ${LEGAL_VERSION}`,
     body.sofortiger_beginn
       ? "Sie haben ausdrücklich verlangt, dass die Leistung vor Ablauf der Widerrufsfrist beginnt."
@@ -1068,7 +1188,7 @@ async function aboAnlegen(request, env) {
     "",
     "Anbieter: Jörg Roeloffs, Scholkwai 86, 25938 Süderende, Telefon 01724149356, wasserentnahme-foehr@web.de",
     "Leistung: Browserbasierte Föhr-Karte mit Wasserentnahmestellen und Defibrillatoren; Nutzung auf bis zu zwei registrierten Geräten.",
-    "Technische Voraussetzungen: aktueller Browser und Internetzugang; nach dem ersten Laden sind Teile der Anwendung offline nutzbar.",
+    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist. Nach einer erfolgreichen Prüfung läuft sie bei fehlender Verbindung bis zu 72 Stunden weiter.",
     "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
     "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
     `Kündigung: im Kundenbereich oder ohne Anmeldung unter ${basisUrl(env)}/kuendigen.html.`,
@@ -1077,7 +1197,7 @@ async function aboAnlegen(request, env) {
     `Sie können den Vertrag binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Senden Sie dazu eine eindeutige Erklärung an den Anbieter oder nutzen Sie ${basisUrl(env)}/widerruf.html. Zur Fristwahrung genügt die rechtzeitige Absendung. Nach Widerruf werden erhaltene Zahlungen unverzüglich und spätestens binnen vierzehn Tagen mit demselben Zahlungsmittel zurückgezahlt. Bei ausdrücklich verlangtem vorzeitigem Leistungsbeginn kann Wertersatz für die bis zum Widerruf erbrachte Leistung anfallen.`,
     "Muster: Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Löschbärt Föhr Jahreszugang. Name, Anschrift, Bestelldatum, Datum.",
     "",
-    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach verlängert sich der Vertrag um jeweils weitere zwölf Monate, sofern er nicht mit einer Frist von sechs Wochen zum Ende der jeweiligen Laufzeit gekündigt wird; für eine ordentliche Kündigung erfolgt keine anteilige Erstattung. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
+    `Vereinbarte AGB (Fassung ${LEGAL_VERSION}): Der Zugang ist persönlich und auf zwei registrierte Geräte begrenzt. Zugangsdaten dürfen nicht an Dritte weitergegeben werden. Die Mindestlaufzeit beträgt zwölf Monate ab Leistungsbeginn. Danach läuft der Vertrag auf unbestimmte Zeit weiter und kann jederzeit mit einer Frist von einem Monat gekündigt werden, frühestens zum Ablauf der Mindestlaufzeit; endet der Vertrag vor dem Ende eines bezahlten Zwölfmonatszeitraums, wird das Entgelt für die Zeit danach anteilig erstattet. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt. Bei konkretem Missbrauchsverdacht darf der Anbieter den Zugang vorübergehend sichern oder sperren; der Kunde wird informiert und erhält Gelegenheit zur Klärung. Erforderliche Aktualisierungen einschließlich Sicherheitsaktualisierungen werden während des Bereitstellungszeitraums bereitgestellt. Es gelten die gesetzlichen Mängelrechte. Der Anbieter haftet unbeschränkt für Vorsatz, grobe Fahrlässigkeit, Schäden an Leben, Körper oder Gesundheit, nach dem Produkthaftungsgesetz und im Umfang übernommener Garantien. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den typischen vorhersehbaren Schaden begrenzt; im Übrigen ist sie, soweit gesetzlich zulässig, ausgeschlossen. Deutsches Recht gilt unter Wahrung zwingender Verbraucherschutzvorschriften. Der Anbieter nimmt nicht an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teil.`,
     `Zusätzliche lesbare Fassung: ${basisUrl(env)}/agb.html`,
     `Datenschutz: ${basisUrl(env)}/datenschutz.html`,
   ].join("\n");
@@ -1330,7 +1450,13 @@ async function rateLimitUeberschritten(request, env) {
 
 function adminAutorisiert(request, env) {
   const passwort = request.headers.get("X-Admin-Passwort") || "";
-  return env.ADMIN_PASSWORT && passwort === env.ADMIN_PASSWORT;
+  if (!env.ADMIN_PASSWORT) return false;
+  const a = new TextEncoder().encode(passwort);
+  const b = new TextEncoder().encode(env.ADMIN_PASSWORT);
+  // Laenge geht in den Vergleich ein, der Inhalt wird aber ohne fruehen Abbruch geprueft.
+  let unterschied = a.length ^ b.length;
+  for (let i = 0; i < b.length; i++) unterschied |= (a[i] ?? 0) ^ b[i];
+  return unterschied === 0;
 }
 
 async function adminAnfrage(request, env, url) {
@@ -1360,6 +1486,19 @@ async function adminAnfrage(request, env, url) {
       "aktiv=eq.true&select=code,bezeichnung,zielgruppe,max_geraete,preis_cent,oeffentlich&order=bezeichnung.asc"
     );
     return json(tarife);
+  }
+  if (pfad === "/api/admin/gnadenschluessel" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      const oeffentlich = await erzeugeGnadenSchluessel(env, body.neu === true);
+      await db.insert("admin_actions", [
+        { admin_name: "Joerg", aktion: body.neu === true ? "gnadenschluessel_neu" : "gnadenschluessel_geprueft", details: "oeffentlicher Schluessel abgerufen" },
+      ]);
+      return json(oeffentlich);
+    } catch (e) {
+      console.error("Gnadenschluessel", String(e));
+      return json({ fehler: "schluessel_nicht_moeglich" }, 500);
+    }
   }
   if (pfad === "/api/admin/erklaerungen" && request.method === "GET") {
     const erklaerungen = await db.select(
@@ -1691,10 +1830,32 @@ async function adminLoeschen(request, env, db) {
 
   const treffer = await db.select(
     "subscriptions",
-    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,customer_id,customer_profiles(email)`
+    `id=eq.${filterWert(body.subscription_id)}&select=id,vertragsnummer,customer_id,paypal_subscription_id,customer_profiles(email)`
   );
   if (treffer.length === 0) return json({ fehler: "unbekannter_vertrag" }, 404);
   const subscription = treffer[0];
+
+  // Ein noch laufendes PayPal-Abo wuerde weiter abbuchen, obwohl der Vertrag
+  // hier verschwindet. Deshalb muss es vorher beendet sein.
+  if (subscription.paypal_subscription_id) {
+    let paypalStatus = "";
+    try {
+      const details = await holeAboDetails(env, subscription.paypal_subscription_id);
+      paypalStatus = String(details.status || "").toUpperCase();
+    } catch {
+      return json({ fehler: "paypal_status_unbekannt" }, 502);
+    }
+    if (!["CANCELLED", "EXPIRED"].includes(paypalStatus)) {
+      return json({ fehler: "paypal_abo_noch_aktiv" }, 409);
+    }
+  }
+
+  // Rechnungen sind steuerlich aufzubewahren (8 Jahre). Beim Loeschen eines
+  // Vertrags verschwinden sie mit; deshalb nur nach ausdruecklicher Bestaetigung.
+  const rechnungen = await db.select("invoices", `subscription_id=eq.${filterWert(subscription.id)}&select=id`);
+  if (rechnungen.length > 0 && body.rechnungen_loeschen !== true) {
+    return json({ fehler: "rechnungen_vorhanden", anzahl: rechnungen.length }, 409);
+  }
 
   await db.insert("admin_actions", [
     {
