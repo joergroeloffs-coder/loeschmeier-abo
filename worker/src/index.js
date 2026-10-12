@@ -91,6 +91,9 @@ export default {
       if (url.pathname === "/api/zugriff" && request.method === "GET") {
         return await pruefeZugriff(request, env);
       }
+      if (url.pathname === "/api/zugriff-schluessel" && request.method === "GET") {
+        return await gnadenSchluesselOeffentlich(env);
+      }
       if (url.pathname === "/api/stellen" && request.method === "GET") {
         return await geschuetzteStellen(request, env);
       }
@@ -932,7 +935,83 @@ function istBetreiber(env, email) {
 async function pruefeZugriff(request, env) {
   const ergebnis = await entscheideZugriff(request, env);
   const { status = 200, ...rest } = ergebnis;
+  // Nach erfolgreicher Pruefung gibt der Server eine signierte Gnadenfrist mit,
+  // damit die App bei kurzzeitig fehlender Verbindung (Funkloch) weiterlaeuft.
+  // Betreiberkonten und Betreiberseiten brauchen die Verbindung immer.
+  if (ergebnis.erlaubt && !ergebnis.betreiber) {
+    const geraet = new URL(request.url).searchParams.get("geraet");
+    try {
+      const gnade = await signiereGnadenToken(env, geraet);
+      if (gnade) {
+        rest.gnadenToken = gnade.token;
+        rest.gnadenBis = gnade.bis;
+      }
+    } catch (e) {
+      console.error("Gnadenfrist konnte nicht signiert werden", String(e));
+    }
+  }
   return json(rest, ergebnis.erlaubt ? 200 : status);
+}
+
+// ---------- Gnadenfrist (signierte Offline-Freigabe) ----------
+// ECDSA P-256. Der private Schluessel liegt nur im Worker (KV), der oeffentliche
+// steht in der App-Konfiguration. Die App prueft die Signatur selbst; ohne
+// Schluessel im Worker wird keine Gnadenfrist ausgegeben.
+
+const GNADEN_KV_SCHLUESSEL = "gnaden_schluessel_v1";
+const ECDSA_PARAMETER = { name: "ECDSA", namedCurve: "P-256" };
+
+function zuBase64Url(bytes) {
+  let text = "";
+  for (const b of bytes) text += String.fromCharCode(b);
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function ladeGnadenSchluessel(env) {
+  if (!env.RATE_KV) return null;
+  const roh = await env.RATE_KV.get(GNADEN_KV_SCHLUESSEL);
+  if (!roh) return null;
+  try {
+    return JSON.parse(roh);
+  } catch {
+    return null;
+  }
+}
+
+async function erzeugeGnadenSchluessel(env, neu = false) {
+  if (!env.RATE_KV) throw new Error("kein_kv");
+  if (!neu) {
+    const vorhanden = await ladeGnadenSchluessel(env);
+    if (vorhanden) return vorhanden.oeffentlich;
+  }
+  const paar = await crypto.subtle.generateKey(ECDSA_PARAMETER, true, ["sign", "verify"]);
+  const privat = await crypto.subtle.exportKey("jwk", paar.privateKey);
+  const voll = await crypto.subtle.exportKey("jwk", paar.publicKey);
+  const oeffentlich = { kty: voll.kty, crv: voll.crv, x: voll.x, y: voll.y };
+  await env.RATE_KV.put(GNADEN_KV_SCHLUESSEL, JSON.stringify({ privat, oeffentlich }));
+  return oeffentlich;
+}
+
+async function signiereGnadenToken(env, geraet) {
+  const schluessel = await ladeGnadenSchluessel(env);
+  if (!schluessel || !istUuid(geraet)) return null;
+  const stunden = Math.min(168, Math.max(1, parseInt(env.GNADENFRIST_STUNDEN || "72", 10) || 72));
+  const jetzt = Date.now();
+  const bis = jetzt + stunden * 3600 * 1000;
+  const nutzlast = zuBase64Url(new TextEncoder().encode(JSON.stringify({ v: 1, g: geraet, ab: jetzt, bis })));
+  const key = await crypto.subtle.importKey("jwk", schluessel.privat, ECDSA_PARAMETER, false, ["sign"]);
+  const signatur = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(nutzlast)
+  );
+  return { token: nutzlast + "." + zuBase64Url(new Uint8Array(signatur)), bis };
+}
+
+async function gnadenSchluesselOeffentlich(env) {
+  const schluessel = await ladeGnadenSchluessel(env);
+  if (!schluessel) return json({ fehler: "kein_schluessel" }, 404);
+  return json(schluessel.oeffentlich);
 }
 
 // Liefert die Stellendaten nur an berechtigte Konten aus. Damit haengt der
@@ -1109,7 +1188,7 @@ async function aboAnlegen(request, env) {
     "",
     "Anbieter: Jörg Roeloffs, Scholkwai 86, 25938 Süderende, Telefon 01724149356, wasserentnahme-foehr@web.de",
     "Leistung: Browserbasierte Föhr-Karte mit Wasserentnahmestellen und Defibrillatoren; Nutzung auf bis zu zwei registrierten Geräten.",
-    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist, und lässt sich ohne Internetverbindung nicht öffnen.",
+    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist. Nach einer erfolgreichen Prüfung läuft sie bei fehlender Verbindung bis zu 72 Stunden weiter.",
     "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
     "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
     `Kündigung: im Kundenbereich oder ohne Anmeldung unter ${basisUrl(env)}/kuendigen.html.`,
@@ -1400,6 +1479,19 @@ async function adminAnfrage(request, env, url) {
       "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent,intervall,zielgruppe),payments(status,betrag_cent,zeitpunkt,paypal_capture_id)&order=erstellt_am.desc&payments.order=zeitpunkt.desc"
     );
     return json(kunden);
+  }
+  if (pfad === "/api/admin/gnadenschluessel" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      const oeffentlich = await erzeugeGnadenSchluessel(env, body.neu === true);
+      await db.insert("admin_actions", [
+        { admin_name: "Joerg", aktion: body.neu === true ? "gnadenschluessel_neu" : "gnadenschluessel_geprueft", details: "oeffentlicher Schluessel abgerufen" },
+      ]);
+      return json(oeffentlich);
+    } catch (e) {
+      console.error("Gnadenschluessel", String(e));
+      return json({ fehler: "schluessel_nicht_moeglich" }, 500);
+    }
   }
   if (pfad === "/api/admin/erklaerungen" && request.method === "GET") {
     const erklaerungen = await db.select(
