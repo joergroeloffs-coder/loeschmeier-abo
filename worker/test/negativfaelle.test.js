@@ -1281,7 +1281,7 @@ test("Gnadenfrist: ohne Schluessel im Worker kein Token", async () => {
   assert.equal(schluessel.status, 404);
 });
 
-test("Gnadenfrist: Admin erzeugt Schluessel, Token ist signiert, an das Geraet gebunden und 72 Stunden gueltig", async () => {
+test("Gnadenfrist: Admin erzeugt Schluessel, Token ist signiert, an das Geraet gebunden und 7 Tage gueltig", async () => {
   const { umgebung } = baueUmgebung({ tabellen: AKTIVES_KONTO });
   const worker = await ladeWorker(umgebung);
   const env = { ...ENV, ADMIN_PASSWORT: "geheim", RATE_KV: baueKv() };
@@ -1311,7 +1311,7 @@ test("Gnadenfrist: Admin erzeugt Schluessel, Token ist signiert, an das Geraet g
   assert.equal(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, bytes(signatur), new TextEncoder().encode(nutzlast + "x")), false, "veraenderte Nutzlast wird erkannt");
   const inhalt = JSON.parse(Buffer.from(bytes(nutzlast)).toString("utf8"));
   assert.equal(inhalt.g, GERAET);
-  assert.ok(inhalt.bis - Date.now() > 71 * 3600 * 1000 && inhalt.bis - Date.now() <= 72 * 3600 * 1000);
+  assert.ok(inhalt.bis - Date.now() > 167 * 3600 * 1000 && inhalt.bis - Date.now() <= 168 * 3600 * 1000);
 });
 
 test("Gnadenfrist: Admin-Schluessel nur mit Passwort, abgewiesene Konten bekommen kein Token", async () => {

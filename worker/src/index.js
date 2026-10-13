@@ -1003,7 +1003,7 @@ async function erzeugeGnadenSchluessel(env, neu = false) {
 async function signiereGnadenToken(env, geraet) {
   const schluessel = await ladeGnadenSchluessel(env);
   if (!schluessel || !istUuid(geraet)) return null;
-  const stunden = Math.min(168, Math.max(1, parseInt(env.GNADENFRIST_STUNDEN || "72", 10) || 72));
+  const stunden = Math.min(168, Math.max(1, parseInt(env.GNADENFRIST_STUNDEN || "168", 10) || 168));
   const jetzt = Date.now();
   const bis = jetzt + stunden * 3600 * 1000;
   const nutzlast = zuBase64Url(new TextEncoder().encode(JSON.stringify({ v: 1, g: geraet, ab: jetzt, bis })));
@@ -1196,7 +1196,7 @@ async function aboAnlegen(request, env) {
     "",
     "Anbieter: Jörg Roeloffs, Scholkwai 86, 25938 Süderende, Telefon 01724149356, wasserentnahme-foehr@web.de",
     "Leistung: Browserbasierte Föhr-Karte mit Wasserentnahmestellen und Defibrillatoren; Nutzung auf bis zu zwei registrierten Geräten.",
-    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist. Nach einer erfolgreichen Prüfung läuft sie bei fehlender Verbindung bis zu 72 Stunden weiter.",
+    "Technische Voraussetzungen: aktueller Browser und Internetzugang; die Anwendung prüft bei jedem Öffnen online, ob der Zugang gültig ist. Nach einer erfolgreichen Prüfung läuft sie bei fehlender Verbindung bis zu 7 Tage weiter.",
     "Zahlung: jährlich im Voraus über PayPal. Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen.",
     "Mängelrechte: Es gelten die gesetzlichen Rechte für digitale Produkte nach §§ 327 ff. BGB einschließlich erforderlicher Sicherheitsaktualisierungen.",
     `Kündigung: im Kundenbereich oder ohne Anmeldung unter ${basisUrl(env)}/kuendigen.html.`,

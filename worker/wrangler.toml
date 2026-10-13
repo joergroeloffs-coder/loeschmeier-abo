@@ -10,7 +10,7 @@ PAYPAL_CLIENT_ID = "BAAS2INCyACHF9E1atEfLOwTZtZ_Oco4IJnhP8l0SVucb7JuPcs3ozdnVhyS
 PAYPAL_API_BASE = "https://api-m.paypal.com"
 KULANZ_TAGE = "3"
 # Wie lange die App nach einer erfolgreichen Zugangspruefung ohne Internet weiterlaeuft (Stunden, 1-168).
-GNADENFRIST_STUNDEN = "72"
+GNADENFRIST_STUNDEN = "168"
 SALES_ENABLED = "true"
 TRANSACTIONAL_FROM = "Roewise <noreply@roewise.com>"
 
