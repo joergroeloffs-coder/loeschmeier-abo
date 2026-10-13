@@ -4,3 +4,4 @@ setup/Vertraege.csv
 setup/Kuendigungen_Widerrufe.csv
 __pycache__/
 *.py[cod]
+setup/Sicherung_*/
