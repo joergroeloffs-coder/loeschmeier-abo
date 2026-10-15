@@ -94,6 +94,9 @@ export default {
       if (url.pathname === "/api/zugriff-schluessel" && request.method === "GET") {
         return await gnadenSchluesselOeffentlich(env);
       }
+      if (url.pathname === "/api/route" && request.method === "POST") {
+        return await routeBerechnen(request, env);
+      }
       if (url.pathname === "/api/stellen" && request.method === "GET") {
         return await geschuetzteStellen(request, env);
       }
@@ -583,6 +586,73 @@ async function rechtserklaerungRateLimit(request, env) {
   if (current >= 10) return true;
   await env.RATE_KV.put(key, String(current + 1), { expirationTtl: 3600 });
   return false;
+}
+
+// ---------- Strassenroute (OpenRouteService) ----------
+// Die App fragt hier die Fahrstrecke von der eigenen Position zu einem Punkt ab.
+// Der Schluessel bleibt auf dem Server. Ausschalten: Secret ORS_API_KEY
+// loeschen - dann antwortet der Endpunkt mit 503 und die App zeigt einen Hinweis.
+// Es wird nichts gespeichert oder protokolliert, nur der Aufruf weitergereicht.
+const ROUTE_ZIEL_BOX = { s: 54.60, n: 54.80, w: 8.25, o: 8.70 }; // Foehr und Umgebung
+const ROUTE_START_BOX = { s: 54.30, n: 55.20, w: 8.00, o: 9.30 }; // Nordfriesland
+const ROUTE_MAX_PRO_STUNDE = 30;
+
+function routeKoordinate(wert, box) {
+  if (!Array.isArray(wert) || wert.length !== 2) return null;
+  const [lat, lon] = wert;
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < box.s || lat > box.n || lon < box.w || lon > box.o) return null;
+  return [lat, lon];
+}
+
+async function routeRateLimit(request, env) {
+  if (!env.RATE_KV) return false;
+  const ip = request.headers.get("CF-Connecting-IP") || "unbekannt";
+  const key = `route:${ip}`;
+  const aktuell = parseInt((await env.RATE_KV.get(key)) || "0", 10);
+  if (aktuell >= ROUTE_MAX_PRO_STUNDE) return true;
+  await env.RATE_KV.put(key, String(aktuell + 1), { expirationTtl: 3600 });
+  return false;
+}
+
+async function routeBerechnen(request, env) {
+  if (!env.ORS_API_KEY) return json({ fehler: "route_nicht_verfuegbar" }, 503);
+  const body = await request.json().catch(() => ({}));
+  const von = routeKoordinate(body.von, ROUTE_START_BOX);
+  const nach = routeKoordinate(body.nach, ROUTE_ZIEL_BOX);
+  if (!von || !nach) return json({ fehler: "ungueltige_koordinaten" }, 400);
+  if (await routeRateLimit(request, env)) return json({ fehler: "zu_viele_anfragen" }, 429);
+
+  let antwort;
+  try {
+    antwort = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
+      method: "POST",
+      headers: { Authorization: env.ORS_API_KEY, "Content-Type": "application/json" },
+      // Radius: auch Punkte abseits der Strasse (Feldweg, Deich) werden an die naechste Strasse gelegt.
+      body: JSON.stringify({
+        coordinates: [[von[1], von[0]], [nach[1], nach[0]]],
+        radiuses: [2000, 2000],
+      }),
+      signal: AbortSignal.timeout(12000),
+    });
+  } catch {
+    return json({ fehler: "route_dienst_nicht_erreichbar" }, 502);
+  }
+  if (antwort.status === 404 || antwort.status === 400) return json({ fehler: "keine_route" }, 404);
+  if (!antwort.ok) return json({ fehler: "route_dienst_fehler" }, 502);
+
+  const daten = await antwort.json().catch(() => null);
+  const feature = daten?.features?.[0];
+  const koordinaten = feature?.geometry?.coordinates;
+  const summe = feature?.properties?.summary;
+  if (!Array.isArray(koordinaten) || !summe) return json({ fehler: "keine_route" }, 404);
+  return json({
+    // GeoJSON liefert [lon, lat]; die App erwartet [lat, lon].
+    punkte: koordinaten.map(([lon, lat]) => [lat, lon]),
+    meter: Math.round(summe.distance),
+    sekunden: Math.round(summe.duration),
+  });
 }
 
 // ---------- Webhook ----------

@@ -1351,3 +1351,78 @@ test("Zugriff: manueller Zugang mit Leistungsbeginn in der Vergangenheit ist fre
   const ergebnisSpaeter = await (await spaeter.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "gueltig" }), ENV)).json();
   assert.equal(ergebnisSpaeter.erlaubt, false);
 });
+
+// ---------- Strassenroute ----------
+
+function routeUmgebung(orsAntwort) {
+  const { umgebung } = baueUmgebung();
+  const aufrufe = [];
+  const original = umgebung.fetch;
+  umgebung.fetch = async (url, optionen = {}) => {
+    if (String(url).includes("openrouteservice.org")) {
+      aufrufe.push({ url: String(url), optionen });
+      return orsAntwort();
+    }
+    return original(url, optionen);
+  };
+  return { umgebung, aufrufe };
+}
+
+const ORS_GUT = () => new Response(JSON.stringify({
+  features: [{
+    geometry: { coordinates: [[8.5, 54.68], [8.55, 54.69]] },
+    properties: { summary: { distance: 1234.4, duration: 301.2 } },
+  }],
+}), { status: 200 });
+
+const ROUTE_KOERPER = { von: [54.68, 8.50], nach: [54.69, 8.55] };
+
+test("Route: ohne ORS_API_KEY ausgeschaltet (503), kein Aufruf nach aussen", async () => {
+  const { umgebung, aufrufe } = routeUmgebung(ORS_GUT);
+  const worker = await ladeWorker(umgebung);
+  const antwort = await worker.fetch(anfrage("/api/route", { methode: "POST", koerper: ROUTE_KOERPER }), ENV);
+  assert.equal(antwort.status, 503);
+  assert.equal(aufrufe.length, 0);
+});
+
+test("Route: Koordinaten ausserhalb des Gebiets werden abgewiesen", async () => {
+  const { umgebung, aufrufe } = routeUmgebung(ORS_GUT);
+  const worker = await ladeWorker(umgebung);
+  const env = { ...ENV, ORS_API_KEY: "ors-key" };
+  for (const koerper of [
+    { von: [48.1, 11.5], nach: [54.69, 8.55] },      // Start in Muenchen
+    { von: [54.68, 8.50], nach: [53.5, 10.0] },      // Ziel in Hamburg
+    { von: [54.68, 8.50], nach: "54.69,8.55" },      // falsches Format
+    { von: [54.68, "x"], nach: [54.69, 8.55] },
+    {},
+  ]) {
+    const antwort = await worker.fetch(anfrage("/api/route", { methode: "POST", koerper }), env);
+    assert.equal(antwort.status, 400);
+  }
+  assert.equal(aufrufe.length, 0);
+});
+
+test("Route: gueltige Anfrage liefert Punkte als [lat, lon] und reicht nur den Schluessel weiter", async () => {
+  const { umgebung, aufrufe } = routeUmgebung(ORS_GUT);
+  const worker = await ladeWorker(umgebung);
+  const env = { ...ENV, ORS_API_KEY: "ors-key" };
+  const antwort = await worker.fetch(anfrage("/api/route", { methode: "POST", koerper: ROUTE_KOERPER }), env);
+  assert.equal(antwort.status, 200);
+  const daten = await antwort.json();
+  assert.deepEqual(daten.punkte, [[54.68, 8.5], [54.69, 8.55]]);
+  assert.equal(daten.meter, 1234);
+  assert.equal(daten.sekunden, 301);
+  assert.equal(aufrufe.length, 1);
+  assert.equal(aufrufe[0].optionen.headers.Authorization, "ors-key");
+  assert.deepEqual(JSON.parse(aufrufe[0].optionen.body).coordinates, [[8.5, 54.68], [8.55, 54.69]]);
+});
+
+test("Route: Fehler des Dienstes werden sauber gemeldet", async () => {
+  const env = { ...ENV, ORS_API_KEY: "ors-key" };
+  for (const [status, erwartet] of [[404, 404], [400, 404], [500, 502], [429, 502]]) {
+    const { umgebung } = routeUmgebung(() => new Response("{}", { status }));
+    const worker = await ladeWorker(umgebung);
+    const antwort = await worker.fetch(anfrage("/api/route", { methode: "POST", koerper: ROUTE_KOERPER }), env);
+    assert.equal(antwort.status, erwartet);
+  }
+});
