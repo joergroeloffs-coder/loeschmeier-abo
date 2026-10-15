@@ -626,7 +626,7 @@ async function routeBerechnen(request, env) {
 
   let antwort;
   try {
-    antwort = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
+    antwort = await fetch("https://api.heigit.org/openrouteservice/v2/directions/driving-car/geojson", {
       method: "POST",
       headers: { Authorization: env.ORS_API_KEY, "Content-Type": "application/json" },
       // Radius: auch Punkte abseits der Strasse (Feldweg, Deich) werden an die naechste Strasse gelegt.

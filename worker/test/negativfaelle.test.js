@@ -1359,7 +1359,7 @@ function routeUmgebung(orsAntwort) {
   const aufrufe = [];
   const original = umgebung.fetch;
   umgebung.fetch = async (url, optionen = {}) => {
-    if (String(url).includes("openrouteservice.org")) {
+    if (String(url).includes("api.heigit.org/openrouteservice/")) {
       aufrufe.push({ url: String(url), optionen });
       return orsAntwort();
     }
