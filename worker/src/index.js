@@ -633,6 +633,10 @@ async function routeBerechnen(request, env) {
       body: JSON.stringify({
         coordinates: [[von[1], von[0]], [nach[1], nach[0]]],
         radiuses: [2000, 2000],
+        // Abbiegehinweise auf Deutsch, damit die App die naechste Abzweigung zeigen kann.
+        instructions: true,
+        language: "de",
+        instructions_format: "text",
       }),
       signal: AbortSignal.timeout(12000),
     });
@@ -647,11 +651,21 @@ async function routeBerechnen(request, env) {
   const koordinaten = feature?.geometry?.coordinates;
   const summe = feature?.properties?.summary;
   if (!Array.isArray(koordinaten) || !summe) return json({ fehler: "keine_route" }, 404);
+  // Jeder Schritt beginnt am Abbiegepunkt: i = Index in punkte, m = Laenge des Schritts, t = Text.
+  const schritte = [];
+  for (const segment of feature.properties.segments || []) {
+    for (const schritt of segment.steps || []) {
+      const index = schritt?.way_points?.[0];
+      if (!Number.isInteger(index)) continue;
+      schritte.push({ i: index, m: Math.round(schritt.distance || 0), t: String(schritt.instruction || "").slice(0, 120) });
+    }
+  }
   return json({
     // GeoJSON liefert [lon, lat]; die App erwartet [lat, lon].
     punkte: koordinaten.map(([lon, lat]) => [lat, lon]),
     meter: Math.round(summe.distance),
     sekunden: Math.round(summe.duration),
+    schritte: schritte.slice(0, 200),
   });
 }
 

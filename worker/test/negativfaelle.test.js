@@ -1371,7 +1371,13 @@ function routeUmgebung(orsAntwort) {
 const ORS_GUT = () => new Response(JSON.stringify({
   features: [{
     geometry: { coordinates: [[8.5, 54.68], [8.55, 54.69]] },
-    properties: { summary: { distance: 1234.4, duration: 301.2 } },
+    properties: {
+      summary: { distance: 1234.4, duration: 301.2 },
+      segments: [{ steps: [
+        { distance: 800, instruction: "Fahren Sie nach Osten", way_points: [0, 1] },
+        { distance: 434, instruction: "Biegen Sie links ab", way_points: [1, 1] },
+      ] }],
+    },
   }],
 }), { status: 200 });
 
@@ -1412,6 +1418,12 @@ test("Route: gueltige Anfrage liefert Punkte als [lat, lon] und reicht nur den S
   assert.deepEqual(daten.punkte, [[54.68, 8.5], [54.69, 8.55]]);
   assert.equal(daten.meter, 1234);
   assert.equal(daten.sekunden, 301);
+  assert.deepEqual(daten.schritte, [
+    { i: 0, m: 800, t: "Fahren Sie nach Osten" },
+    { i: 1, m: 434, t: "Biegen Sie links ab" },
+  ]);
+  const gesendet = JSON.parse(aufrufe[0].optionen.body);
+  assert.equal(gesendet.language, "de");
   assert.equal(aufrufe.length, 1);
   assert.equal(aufrufe[0].optionen.headers.Authorization, "ors-key");
   assert.deepEqual(JSON.parse(aufrufe[0].optionen.body).coordinates, [[8.5, 54.68], [8.55, 54.69]]);
