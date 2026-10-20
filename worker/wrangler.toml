@@ -2,6 +2,9 @@ name = "loeschbaert-worker"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# Im Dashboard gesetzte Werte (z.B. BETREIBER_AUTH_EMAILS) bleiben beim Deploy erhalten.
+keep_vars = true
+
 # Nicht-geheime Werte duerfen hier stehen (Client ID, URLs).
 [vars]
 SUPABASE_URL = "https://bmntahgtagjijfyeepju.supabase.co"
