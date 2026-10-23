@@ -1581,7 +1581,7 @@ async function adminAnfrage(request, env, url) {
   if (pfad === "/api/admin/kunden" && request.method === "GET") {
     const kunden = await db.select(
       "subscriptions",
-      "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,max_geraete_override,notiz,paypal_subscription_id,customer_profiles(email),tariffs(bezeichnung,preis_cent,intervall,zielgruppe,max_geraete),payments(status,betrag_cent,zeitpunkt,paypal_capture_id)&order=erstellt_am.desc&payments.order=zeitpunkt.desc"
+      "select=id,customer_id,vertragsnummer,status,beginn,erstellt_am,naechste_zahlung,bezahlt_bis,gekuendigt_am,kuendigungswirksam_am,manuell_gesperrt,max_geraete_override,notiz,paypal_subscription_id,customer_profiles(email,devices(id,geraet_name,zuletzt_aktiv)),tariffs(bezeichnung,preis_cent,intervall,zielgruppe,max_geraete),payments(status,betrag_cent,zeitpunkt,paypal_capture_id)&order=erstellt_am.desc&payments.order=zeitpunkt.desc"
     );
     return json(kunden);
   }
