@@ -902,10 +902,19 @@ const STANDARD_MAX_GERAETE = 2;
 // Zentrale Entscheidung "darf dieses Geraet dieses Konto nutzen?". Sie wird
 // sowohl von /api/zugriff als auch vor der Auslieferung der Stellendaten
 // verwendet, damit beide Wege nie auseinanderlaufen koennen.
+function bereinigeGeraeteName(roh) {
+  if (typeof roh !== "string") return null;
+  const name = roh.replace(/[^\p{L}\p{N} .\-]/gu, "").trim().slice(0, 40);
+  return name || null;
+}
+
 async function entscheideZugriff(request, env) {
   const authHeader = request.headers.get("Authorization") || "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "");
   const geraetId = new URL(request.url).searchParams.get("geraet");
+  // Anzeigename des Geraets (z.B. "Android Chrome"), vom Geraet vorgeschlagen:
+  // nur Buchstaben, Ziffern, Leerzeichen und wenige Zeichen, hoechstens 40.
+  const geraetName = bereinigeGeraeteName(new URL(request.url).searchParams.get("name"));
 
   // Die Geraetekennung wird auf dem Geraet erzeugt und landet in der
   // Datenbank; sie muss deshalb ein eng begrenztes Format haben.
@@ -991,18 +1000,19 @@ async function entscheideZugriff(request, env) {
   const maxGeraete = abo.max_geraete_override ?? abo.tariffs?.max_geraete ?? STANDARD_MAX_GERAETE;
   const geraete = await db.select(
     "devices",
-    `customer_id=eq.${filterWert(customerId)}&select=id,geraet_kennung`
+    `customer_id=eq.${filterWert(customerId)}&select=id,geraet_kennung,geraet_name`
   );
   const bekannt = geraete.find((g) => g.geraet_kennung === geraetId);
   if (!bekannt) {
     if (geraete.length >= maxGeraete) {
       return { erlaubt: false, grund: "geraetelimit_erreicht", maxGeraete };
     }
-    await db.insert("devices", [{ customer_id: customerId, geraet_kennung: geraetId, bestaetigt: true }]);
+    await db.insert("devices", [{ customer_id: customerId, geraet_kennung: geraetId, geraet_name: geraetName, bestaetigt: true }]);
   } else {
-    await db.update("devices", `id=eq.${filterWert(bekannt.id)}`, {
-      zuletzt_aktiv: new Date().toISOString(),
-    });
+    const aenderung = { zuletzt_aktiv: new Date().toISOString() };
+    // Einen vom Kunden vergebenen Namen nie ueberschreiben, nur fehlende ergaenzen.
+    if (!bekannt.geraet_name && geraetName) aenderung.geraet_name = geraetName;
+    await db.update("devices", `id=eq.${filterWert(bekannt.id)}`, aenderung);
   }
 
   return {
@@ -1637,6 +1647,17 @@ async function adminAnfrage(request, env, url) {
     const body = await request.json().catch(() => ({}));
     if (!istUuid(body.customer_id)) return json({ fehler: "fehlende_angaben" }, 400);
     return await adminGeraeteZuruecksetzen(env, db, body.customer_id);
+  }
+  if (pfad === "/api/admin/geraet-entfernen" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    if (!istUuid(body.device_id)) return json({ fehler: "fehlende_angaben" }, 400);
+    const gefunden = await db.select("devices", `id=eq.${filterWert(body.device_id)}&select=id,customer_id`);
+    if (!gefunden.length) return json({ fehler: "nicht_gefunden" }, 404);
+    await db.delete("devices", `id=eq.${filterWert(body.device_id)}`);
+    await db.insert("admin_actions", [
+      { admin_name: "Joerg", aktion: "geraet_entfernt", customer_id: gefunden[0].customer_id },
+    ]);
+    return json({ status: "ok" });
   }
   if (pfad === "/api/admin/erklaerung-ausloesen" && request.method === "POST") {
     return await adminErklaerungAusloesen(request, env, db);

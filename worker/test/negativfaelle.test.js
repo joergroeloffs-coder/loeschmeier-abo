@@ -1438,3 +1438,55 @@ test("Route: Fehler des Dienstes werden sauber gemeldet", async () => {
     assert.equal(antwort.status, erwartet);
   }
 });
+
+// ---------- Geraetenamen und einzelnes Geraet entfernen ----------
+
+const G1 = "11111111-1111-4111-8111-111111111111";
+
+function vertragMitGeraeten(geraete) {
+  return baueUmgebung({
+    tabellen: {
+      customer_profiles: [{ id: "kunde-1", auth_user_id: "user-1" }],
+      subscriptions: [{ id: "abo-1", customer_id: "kunde-1", status: "aktiv", bezahlt_bis: "2099-01-01T00:00:00Z", tariffs: { max_geraete: 5 } }],
+      devices: geraete,
+    },
+  });
+}
+
+test("Zugriff: neues Geraet bekommt den (bereinigten) Namen, ein vergebener Name bleibt", async () => {
+  const { umgebung, daten } = vertragMitGeraeten([
+    { id: "g2", customer_id: "kunde-1", geraet_kennung: "22222222-2222-4222-8222-222222222222", geraet_name: "Mein Tablet" },
+    { id: "g3", customer_id: "kunde-1", geraet_kennung: "33333333-3333-4333-8333-333333333333", geraet_name: null },
+  ]);
+  const worker = await ladeWorker(umgebung);
+  const name = encodeURIComponent("Android <b>Chrome</b>; DROP");
+  assert.equal((await worker.fetch(anfrage(`/api/zugriff?geraet=${G1}&name=${name}`, { token: "gueltig" }), ENV)).status, 200);
+  const neu = daten.devices.find((d) => d.geraet_kennung === G1);
+  assert.equal(neu.geraet_name, "Android bChromeb DROP");
+
+  // vorhandener Kundenname wird nicht ueberschrieben, fehlender ergaenzt
+  await worker.fetch(anfrage("/api/zugriff?geraet=22222222-2222-4222-8222-222222222222&name=Windows%20Edge", { token: "gueltig" }), ENV);
+  await worker.fetch(anfrage("/api/zugriff?geraet=33333333-3333-4333-8333-333333333333&name=Windows%20Edge", { token: "gueltig" }), ENV);
+  assert.equal(daten.devices.find((d) => d.id === "g2").geraet_name, "Mein Tablet");
+  assert.equal(daten.devices.find((d) => d.id === "g3").geraet_name, "Windows Edge");
+});
+
+test("Admin: einzelnes Geraet entfernen, nur mit Passwort und gueltiger Kennung", async () => {
+  const { umgebung, daten } = vertragMitGeraeten([
+    { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", customer_id: "kunde-1", geraet_kennung: G1 },
+    { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", customer_id: "kunde-1", geraet_kennung: "22222222-2222-4222-8222-222222222222" },
+  ]);
+  const worker = await ladeWorker(umgebung);
+  const env = { ...ENV, ADMIN_PASSWORT: "geheim" };
+  const senden = (koerper, passwort) => worker.fetch(new Request("https://worker.test/api/admin/geraet-entfernen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(passwort ? { "X-Admin-Passwort": passwort } : {}) },
+    body: JSON.stringify(koerper),
+  }), env);
+  assert.notEqual((await senden({ device_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, null)).status, 200);
+  assert.equal(daten.devices.length, 2);
+  assert.equal((await senden({ device_id: "kaputt" }, "geheim")).status, 400);
+  assert.equal((await senden({ device_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }, "geheim")).status, 404);
+  assert.equal((await senden({ device_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, "geheim")).status, 200);
+  assert.deepEqual(daten.devices.map((d) => d.id), ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
+});
