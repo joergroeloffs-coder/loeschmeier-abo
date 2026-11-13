@@ -1314,6 +1314,21 @@ test("Gnadenfrist: Admin erzeugt Schluessel, Token ist signiert, an das Geraet g
   assert.ok(inhalt.bis - Date.now() > 167 * 3600 * 1000 && inhalt.bis - Date.now() <= 168 * 3600 * 1000);
 });
 
+test("Gnadenfrist: auch das Betreiberkonto bekommt ein Token, ein Kundenkonto nur mit Zugang", async () => {
+  const { umgebung } = baueUmgebung({ tabellen: AKTIVES_KONTO });
+  const worker = await ladeWorker(umgebung);
+  const kv = baueKv();
+  await worker.fetch(new Request("https://worker.test/api/admin/gnadenschluessel", {
+    method: "POST", headers: { "X-Admin-Passwort": "geheim" }, body: "{}",
+  }), { ...ENV, ADMIN_PASSWORT: "geheim", RATE_KV: kv });
+  const antwort = await worker.fetch(anfrage(`/api/zugriff?geraet=${GERAET}`, { token: "betrieb" }), { ...ENV, RATE_KV: kv });
+  const daten = await antwort.json();
+  assert.equal(daten.erlaubt, true);
+  assert.equal(daten.betreiber, true);
+  assert.ok(daten.gnadenToken);
+  assert.ok(daten.gnadenBis);
+});
+
 test("Gnadenfrist: Admin-Schluessel nur mit Passwort, abgewiesene Konten bekommen kein Token", async () => {
   const { umgebung } = baueUmgebung({
     tabellen: {

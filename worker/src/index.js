@@ -1039,8 +1039,9 @@ async function pruefeZugriff(request, env) {
   const { status = 200, ...rest } = ergebnis;
   // Nach erfolgreicher Pruefung gibt der Server eine signierte Gnadenfrist mit,
   // damit die App bei kurzzeitig fehlender Verbindung (Funkloch) weiterlaeuft.
-  // Betreiberkonten und Betreiberseiten brauchen die Verbindung immer.
-  if (ergebnis.erlaubt && !ergebnis.betreiber) {
+  // Auch das Betreiberkonto bekommt sie fuer die Nutzer-App; die Betreiberseiten
+  // selbst (data-betreiber) nutzen sie clientseitig nie und brauchen immer Netz.
+  if (ergebnis.erlaubt) {
     const geraet = new URL(request.url).searchParams.get("geraet");
     try {
       const gnade = await signiereGnadenToken(env, geraet);
